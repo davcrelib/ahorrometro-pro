@@ -1,6 +1,7 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getAnalytics, isSupported } from "firebase/analytics";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
@@ -12,6 +13,10 @@ const firebaseConfig = {
 };
 
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+
+if (typeof window !== "undefined") {
+  isSupported().then((ok) => ok && getAnalytics(app));
+}
 
 export const auth = getAuth(app);
 export const provider = new GoogleAuthProvider();
