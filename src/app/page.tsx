@@ -10,18 +10,36 @@ export default function HomePage() {
   const router = useRouter();
   const [signingIn, setSigningIn] = useState(false);
 
+  async function signInIfNeeded() {
+    if (auth.currentUser) return;
+    const provider = new GoogleAuthProvider();
+    await signInWithPopup(auth, provider);
+  }
+
   async function handleSignIn() {
     try {
       setSigningIn(true);
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      await signInIfNeeded();
       router.push("/app");
     } catch (e) {
-      alert("No se pudo iniciar sesión. Revisa Firebase Auth (proveedores habilitados y dominios autorizados).")
+      alert("No se pudo iniciar sesión. Revisa Firebase Auth (proveedores habilitados y dominios autorizados).");
     } finally {
       setSigningIn(false);
     }
   }
+
+  async function handleCTA(target: string) {
+    try {
+      setSigningIn(true);
+      await signInIfNeeded();
+      router.push(target);
+    } catch (e) {
+      alert("No se pudo continuar. Comprueba el inicio de sesión de Google y los dominios autorizados en Firebase.");
+    } finally {
+      setSigningIn(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#0b0f14] via-[#0e141b] to-[#0b0f14] text-white">
       {/* NAVBAR */}
@@ -33,10 +51,8 @@ export default function HomePage() {
           <span className="font-semibold tracking-tight">Ahorrómetro</span>
         </div>
         <div className="flex items-center gap-3 text-sm">
-          <Link href="/app" className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition">Ir al panel</Link>
-          <button onClick={handleSignIn} disabled={signingIn} className="px-4 py-2 rounded-xl bg-white text-black hover:opacity-90 transition disabled:opacity-60">
-            {signingIn ? "Entrando…" : "Entrar"}
-          </button>
+          <button onClick={() => handleCTA("/app")} className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition">Ir al panel</button>
+          <button onClick={handleSignIn} disabled={signingIn} className="px-4 py-2 rounded-xl bg-white text-black hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Entrando…" : "Entrar"}</button>
         </div>
       </nav>
 
@@ -53,7 +69,7 @@ export default function HomePage() {
                 Ahorrómetro convierte tus ingresos y gastos en una guía clara: ve cuánto <b>ganas cada hora</b>, cuánto puedes <b>gastar esta semana</b> y cómo avanza tu <b>objetivo del piso</b>.
               </p>
               <div className="mt-6 flex flex-wrap gap-3">
-                <Link href="/app" className="px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition">Probar gratis</Link>
+                <button onClick={() => handleCTA("/app")} disabled={signingIn} className="px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Cargando…" : "Probar gratis"}</button>
                 <a href="#precios" className="px-5 py-3 rounded-2xl bg-white/5 border border-white/10 font-medium hover:bg-white/10 transition">Ver planes</a>
               </div>
               <div className="mt-6 grid grid-cols-3 gap-4 text-sm text-white/80">
@@ -149,7 +165,7 @@ export default function HomePage() {
           ))}
         </div>
         <div className="mt-8 text-center">
-          <Link href="/app" className="px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition">Empieza ahora</Link>
+          <button onClick={() => handleCTA("/app")} disabled={signingIn} className="px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Cargando…" : "Empieza ahora"}</button>
         </div>
       </section>
 
@@ -181,7 +197,7 @@ export default function HomePage() {
               <li>• Datos en tu dispositivo</li>
             </ul>
             <div className="mt-6">
-              <Link href="/app" className="block text-center px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition">Empieza gratis</Link>
+              <button onClick={() => handleCTA("/app")} disabled={signingIn} className="block w-full text-center px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Cargando…" : "Empieza gratis"}</button>
             </div>
           </div>
           {/* PRO */}
@@ -196,7 +212,7 @@ export default function HomePage() {
               <li>• Recordatorios y métricas avanzadas</li>
             </ul>
             <div className="mt-6">
-              <Link href="/billing" className="block text-center px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition">Actualizar a Pro</Link>
+              <button onClick={() => handleCTA("/billing")} disabled={signingIn} className="block w-full text-center px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Cargando…" : "Actualizar a Pro"}</button>
             </div>
           </div>
         </div>
