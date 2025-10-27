@@ -4,9 +4,7 @@ import { auth } from "@/lib/firebase";
 import { getAuth } from "firebase-admin/auth";
 import * as admin from "firebase-admin";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2023-10-16",
-});
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
 // Inicializa Firebase Admin (solo en servidor)
 if (!admin.apps.length) {
