@@ -55,7 +55,7 @@ export const runtime = "edge"; // UI only
 export default function AppPage() {
   const [user, loading] = useAuthState(auth);
 
-  // Perfil Free/Pro (opcional)
+  // Perfil Free/Pro
   const [planTier, setPlanTier] = useState<"free" | "pro">("free");
 
   // Plan
@@ -82,22 +82,24 @@ export default function AppPage() {
   // Métricas
   const [earnedThisMonth, setEarnedThisMonth] = useState<number>(0);
 
-  // Carga perfil + plan + primera página de gastos
+  // === Carga perfil + plan (en tiempo real) ===
   useEffect(() => {
     if (!user) return;
 
-    // Perfil
-    getDoc(doc(db, "users", user.uid)).then(async snap => {
-      if (snap.exists()) setPlanTier((snap.data() as any)?.planTier === "pro" ? "pro" : "free");
-      else {
+    // Perfil (escucha en tiempo real para reflejar cambios del webhook)
+    const unsubUser = onSnapshot(doc(db, "users", user.uid), async (snap) => {
+      if (snap.exists()) {
+        setPlanTier((snap.data() as any)?.planTier === "pro" ? "pro" : "free");
+      } else {
         await setDoc(doc(db, "users", user.uid), { planTier: "free", createdAt: serverTimestamp() }, { merge: true });
         setPlanTier("free");
       }
     });
 
-    // Plan
+    // Plan (carga inicial)
     getDoc(doc(db, "users", user.uid, "plans", "default")).then(s => s.exists() && setPlan(s.data() as Plan));
 
+    return () => unsubUser();
   }, [user]);
 
   // Suscripción a gastos con filtro + primera página
@@ -275,13 +277,46 @@ export default function AppPage() {
     return () => clearInterval(t);
   }, [plan.income]);
 
-  // Upgrade (si luego usas /api/checkout, sustituye handler)
-  const checkoutURL = process.env.NEXT_PUBLIC_STRIPE_CHECKOUT_URL || "";
-  function handleUpgrade() {
-    if (!checkoutURL) { alert("Configura NEXT_PUBLIC_STRIPE_CHECKOUT_URL"); return; }
-    const url = new URL(checkoutURL);
-    if (user?.email) url.searchParams.set("prefilled_email", user.email);
-    window.location.href = url.toString();
+  // === Upgrade / Portal (Stripe) ===
+  async function handleUpgrade() {
+    if (!user?.uid || !user.email) {
+      alert("Inicia sesión primero");
+      return;
+    }
+    try {
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: user.uid, email: user.email }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        alert("Error creando checkout: " + (json?.error || "desconocido"));
+        return;
+      }
+      window.location.href = json.url;
+    } catch (e: any) {
+      alert("Error de red creando checkout");
+    }
+  }
+
+  async function handleManageSubscription() {
+    if (!user?.uid) { alert("Inicia sesión"); return; }
+    try {
+      const res = await fetch("/api/customer-portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: user.uid }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        alert(json?.error || "No se pudo abrir el portal");
+        return;
+      }
+      window.location.href = json.url;
+    } catch (e: any) {
+      alert("Error de red abriendo el portal");
+    }
   }
 
   // -------------- BACKUPS: helpers y handlers --------------
@@ -506,7 +541,7 @@ export default function AppPage() {
         <div className="text-sm opacity-90">Sesión: <b>{user.email}</b></div>
       </header>
 
-      {/* Banner Pro */}
+      {/* Banner Pro / Free */}
       {planTier === "free" ? (
         <section className="rounded-2xl p-4 border border-yellow-400/30 bg-yellow-400/10">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -524,7 +559,14 @@ export default function AppPage() {
         </section>
       ) : (
         <section className="rounded-2xl p-3 border border-emerald-400/30 bg-emerald-400/10">
-          <div className="text-sm"><b>Pro activo</b> — ¡gracias! 💚</div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm"><b>Pro activo</b> — ¡gracias! 💚</div>
+            <div className="flex gap-2">
+              <button onClick={handleManageSubscription} className="rounded-xl px-3 py-2 bg-white/10 border border-white/15">
+                ⚙️ Gestionar suscripción
+              </button>
+            </div>
+          </div>
         </section>
       )}
 
@@ -555,7 +597,7 @@ export default function AppPage() {
       </section>
 
       {/* Progreso objetivo */}
-      <section className="rounded-2xl p-4 bg-white/5 border border-white/10">
+      <section className="rounded-2xl p-4 bg_WHITE/5 border border-white/10">
         <h2 className="font-semibold mb-2">Progreso hacia tu objetivo</h2>
         <div className="text-sm opacity-90 mb-2">
           Ahorros: <b>{fmt(plan.currentSavings)}</b> / Objetivo: <b>{fmt(plan.goal)}</b>{" "}
