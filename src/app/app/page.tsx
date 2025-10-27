@@ -301,23 +301,20 @@ export default function AppPage() {
   }
 
   async function handleManageSubscription() {
-    if (!user?.uid) { alert("Inicia sesión"); return; }
-    try {
-      const res = await fetch("/api/customer-portal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: user.uid }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        alert(json?.error || "No se pudo abrir el portal");
-        return;
-      }
-      window.location.href = json.url;
-    } catch (e: any) {
-      alert("Error de red abriendo el portal");
+    if (!user?.uid || !user.email) { alert("Inicia sesión"); return; }
+    const res = await fetch("/api/customer-portal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid: user.uid, email: user.email }), // <-- añade email
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      alert(json?.error || "No se pudo abrir el portal");
+      return;
     }
+    window.location.href = json.url;
   }
+  
 
   // -------------- BACKUPS: helpers y handlers --------------
   function dl(filename: string, text: string) {
