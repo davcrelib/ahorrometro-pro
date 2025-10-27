@@ -192,10 +192,9 @@ export default function HomePage() {
             <div className="text-sm uppercase tracking-wider text-white/70">Free</div>
             <div className="mt-1 text-4xl font-extrabold">0 €</div>
             <ul className="mt-4 text-sm space-y-2 text-white/85">
-              <li>• Registro de gastos ilimitado</li>
               <li>• Cálculo € / hora y acumulado mensual</li>
-              <li>• Límite semanal automático</li>
-              <li>• Datos en tu dispositivo</li>
+              <li>• Registro de gastos ilimitado</li>
+              <li>• Datos en tu dispositivo local</li>
             </ul>
             <div className="mt-6">
               <button onClick={() => handleCTA("/app")} disabled={signingIn} className="block w-full text-center px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Cargando…" : "Empieza gratis"}</button>
@@ -208,9 +207,9 @@ export default function HomePage() {
             <div className="mt-1 text-4xl font-extrabold">2,99 €<span className="text-base font-semibold text-white/70"> / mes</span></div>
             <ul className="mt-4 text-sm space-y-2 text-white/85">
               <li>• Sincronización en la nube (móvil y PC)</li>
-              <li>• Múltiples objetivos (piso, coche, viaje)</li>
               <li>• Backups automáticos y exportación 1‑click</li>
-              <li>• Recordatorios y métricas avanzadas</li>
+              <li>• Soporte personalizado</li>
+              <li>• Próximamente notificaciones para recordatorios</li>
             </ul>
             <div className="mt-6">
               <button onClick={() => handleCTA("/billing")} disabled={signingIn} className="block w-full text-center px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Cargando…" : "Actualizar a Pro"}</button>
@@ -265,7 +264,7 @@ const features = [
   },
   {
     emoji: "🎯",
-    title: "Objetivo del piso",
+    title: "Objetivo (ej. entrada piso)",
     desc: "Marca tu meta (ej. 150.000 €) y fecha. Calculamos el ahorro mensual que necesitas.",
   },
   {
@@ -303,7 +302,7 @@ const testimonials = [
 
 const faq = [
   { q: "¿Necesito conectar mis bancos?", a: "No. Lo apuntas tú en segundos. Tus datos son tuyos y puedes exportarlos cuando quieras." },
-  { q: "¿Funciona sin internet?", a: "Sí. El plan Free guarda en tu dispositivo y funciona offline. Con Pro se sincroniza cuando vuelves a tener conexión." },
+  { q: "¿Funciona sin internet?", a: "No. Tienes que tener una conexión a internet. Para disfrutar sin conexión puedes trabajar en local utilizando el código fuente en github." },
   { q: "¿Qué incluye el plan Pro?", a: "Sincronización entre dispositivos, múltiples objetivos, backups automáticos y recordatorios." },
   { q: "¿Puedo cancelar cuando quiera?", a: "Claro. Sin permanencia. Si cancelas, tu información sigue siendo tuya." },
 ];
