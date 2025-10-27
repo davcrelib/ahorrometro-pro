@@ -674,6 +674,14 @@ export default function AppPage() {
               <option value="ocio">Ocio</option>
               <option value="restauración">Restauración</option>
               <option value="transporte">Transporte</option>
+              <option value="supermercado">Supermercado</option>
+              <option value="salud">Salud</option>
+              <option value="impuestos">Impuestos</option>
+              <option value="vehículo">Vehículo</option>
+              <option value="seguros">Seguros</option>
+              <option value="ropa">Ropa</option>
+              <option value="viajes">Viajes</option>
+              <option value="regalos">Regalos</option>
               <option value="otros">Otros</option>
             </select>
           </div>
@@ -715,6 +723,14 @@ export default function AppPage() {
                         <option value="ocio">Ocio</option>
                         <option value="restauración">Restauración</option>
                         <option value="transporte">Transporte</option>
+                        <option value="supermercado">Supermercado</option>
+                        <option value="salud">Salud</option>
+                        <option value="impuestos">Impuestos</option>
+                        <option value="vehículo">Vehículo</option>
+                        <option value="seguros">Seguros</option>
+                        <option value="ropa">Ropa</option>
+                        <option value="viajes">Viajes</option>
+                        <option value="regalos">Regalos</option>
                         <option value="otros">Otros</option>
                       </select>
                     </td>

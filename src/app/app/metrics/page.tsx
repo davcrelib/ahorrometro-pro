@@ -122,7 +122,7 @@ export default function MetricsPage() {
             onChange={e=>setMonthISO(e.target.value)}
             className="bg-white/10 px-2 py-1 rounded"
           />
-          <Link href="/app" className="px-3 py-1 bg-white/10 rounded">← Tornar</Link>
+          <Link href="/app" className="px-3 py-1 bg-white/10 rounded">← Volver</Link>
         </div>
       </header>
 
