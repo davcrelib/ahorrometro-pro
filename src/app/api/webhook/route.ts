@@ -1,20 +1,14 @@
-// /src/app/api/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { adminDB } from "../../../lib/firebaseAdmin"; // Si no usas alias "@", cambia a import relativo: ../../../lib/firebaseAdmin
+import { getAdminDB, getAdminAuth } from "@/lib/firebaseAdmin";
 
-export const runtime = "nodejs"; // webhooks deben correr en Node (no Edge)
-
+export const runtime = "nodejs";
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
-// --- Helpers ---
+// Helpers base
 async function setProByUid(uid: string, data: Record<string, any> = {}) {
-  await adminDB.doc(`users/${uid}`).set(
-    {
-      planTier: "pro",
-      proSince: new Date(),
-      ...data,
-    },
+  await getAdminDB().doc(`users/${uid}`).set(
+    { planTier: "pro", proSince: new Date(), ...data },
     { merge: true }
   );
 }
@@ -24,7 +18,7 @@ async function setTierByCustomerId(
   tier: "pro" | "free",
   extras: Record<string, any> = {}
 ) {
-  const snap = await adminDB
+  const snap = await getAdminDB()
     .collection("users")
     .where("stripeCustomerId", "==", customerId)
     .limit(1)
@@ -32,18 +26,59 @@ async function setTierByCustomerId(
 
   if (!snap.empty) {
     await snap.docs[0].ref.set({ planTier: tier, ...extras }, { merge: true });
+    return true;
+  }
+  return false;
+}
+
+// Fallbacks
+async function setProByEmail(email: string, extras: Record<string, any> = {}) {
+  try {
+    const user = await getAdminAuth().getUserByEmail(email);
+    await getAdminDB().doc(`users/${user.uid}`).set(
+      { planTier: "pro", proSince: new Date(), email, ...extras },
+      { merge: true }
+    );
+  } catch {
+    // no existe usuario con ese email en Firebase Auth
   }
 }
 
-// --- Webhook handler ---
+async function upsertByCustomerIdWithEmail(
+  customerId: string,
+  tier: "pro" | "free",
+  extras: Record<string, any> = {}
+) {
+  // 1) intenta por customerId
+  const linked = await setTierByCustomerId(customerId, tier, extras);
+  if (linked) return;
+
+  // 2) busca email del customer en Stripe
+  const cust = (await stripe.customers.retrieve(customerId)) as Stripe.Customer;
+  const email =
+    cust.email ||
+    ((cust as any).invoice_settings && (cust as any).invoice_settings.email) ||
+    undefined;
+
+  if (!email) return;
+
+  // 3) vincula por email → uid y guarda customerId
+  try {
+    const user = await getAdminAuth().getUserByEmail(email);
+    await getAdminDB().doc(`users/${user.uid}`).set(
+      { planTier: tier, stripeCustomerId: customerId, ...extras },
+      { merge: true }
+    );
+  } catch {
+    // sin usuario en Firebase con ese email
+  }
+}
+
 export async function POST(req: NextRequest) {
   const sig = req.headers.get("stripe-signature");
   const secret = process.env.STRIPE_WEBHOOK_SECRET!;
-  if (!sig || !secret) {
-    return NextResponse.json({ error: "Missing signature or secret" }, { status: 400 });
-  }
+  if (!sig || !secret) return NextResponse.json({ error: "Missing signature or secret" }, { status: 400 });
 
-  // ¡OJO! El cuerpo debe ser crudo (string), no JSON
   const rawBody = await req.text();
 
   let event: Stripe.Event;
@@ -61,22 +96,22 @@ export async function POST(req: NextRequest) {
         const uid = (s.metadata as any)?.uid as string | undefined;
         const customerId = (s.customer as string) ?? null;
         const subId = (s.subscription as string) ?? null;
-        const email =
-          s.customer_details?.email || s.customer_email || null;
+        const email = s.customer_details?.email || s.customer_email || null;
 
         if (uid) {
-          // Camino principal: tenemos el uid de tu app
           await setProByUid(uid, {
             stripeCustomerId: customerId,
             stripeSubscriptionId: subId,
             email,
           });
         } else if (customerId) {
-          // Fallback: no llegó uid, enlaza por customerId
-          await setTierByCustomerId(customerId, "pro", {
+          await upsertByCustomerIdWithEmail(customerId, "pro", {
             stripeSubscriptionId: subId,
             email,
           });
+        } else if (s.mode === "payment" && email) {
+          // Emergencia: Payment Link (pago único sin customer/uid). Activa por email.
+          await setProByEmail(email);
         }
         break;
       }
@@ -85,7 +120,7 @@ export async function POST(req: NextRequest) {
         const sub = event.data.object as Stripe.Subscription;
         const customerId = sub.customer as string;
         const isActive = ["trialing", "active", "past_due"].includes(sub.status);
-        await setTierByCustomerId(customerId, isActive ? "pro" : "free", {
+        await upsertByCustomerIdWithEmail(customerId, isActive ? "pro" : "free", {
           stripeSubscriptionStatus: sub.status,
           stripeSubscriptionId: sub.id,
         });
@@ -95,25 +130,24 @@ export async function POST(req: NextRequest) {
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
         const customerId = sub.customer as string;
-        await setTierByCustomerId(customerId, "free", {
+        await upsertByCustomerIdWithEmail(customerId, "free", {
           stripeSubscriptionStatus: "canceled",
         });
         break;
       }
 
       case "invoice.payment_succeeded": {
-        // Fallback: en live a veces verás este evento antes/además del checkout.session.completed
         const inv = event.data.object as Stripe.Invoice;
         const customerId = inv.customer as string | undefined;
 
-        // Algunas versiones de types no incluyen "subscription" en Invoice; hacemos type-guard
+        // algunos typings no exponen 'subscription' en Invoice
         let subId: string | undefined;
         if (typeof inv === "object" && inv !== null && "subscription" in inv) {
           subId = (inv as any).subscription as string | undefined;
         }
 
         if (customerId) {
-          await setTierByCustomerId(customerId, "pro", {
+          await upsertByCustomerIdWithEmail(customerId, "pro", {
             stripeSubscriptionId: subId ?? null,
             lastInvoiceId: inv.id,
           });
@@ -121,9 +155,7 @@ export async function POST(req: NextRequest) {
         break;
       }
 
-      // Puedes loguear otros eventos si quieres
       default:
-        // console.log("Unhandled event:", event.type);
         break;
     }
 
