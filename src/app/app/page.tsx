@@ -547,17 +547,25 @@ export default function AppPage() {
   return (
     <main className="p-4 max-w-6xl mx-auto space-y-4">
       <header className="flex items-center justify-between">
-  <h1 className="text-xl font-bold">🏦 Ahorròmetre</h1>
-  <div className="flex items-center gap-3 text-sm opacity-90">
-    <span><b>{user.email}</b></span>
-      <button
-        onClick={handleLogout}
-        className="px-3 py-1 bg-white/10 rounded hover:bg-white/20 transition"
-      >
-        Tancar sessió
-        </button>
-      </div>
-    </header>
+        <h1 className="text-xl font-bold">🏦 Ahorrometro</h1>
+          <div className="flex items-center gap-3 text-sm opacity-90">
+          <span><b>{user.email}</b></span>
+          <Link
+            href="/app/metrics"
+            className="px-3 py-1 bg-white/10 rounded hover:bg-white/20 transition"
+          >
+            📊 Metricas
+          </Link>
+
+          <button
+            onClick={handleLogout}
+            className="px-3 py-1 bg-white/10 rounded hover:bg-white/20 transition"
+          >
+            Cerrar sesión
+          </button>
+        </div>
+      </header>
+
 
       {/* Banner Pro / Free */}
       {planTier === "free" ? (
