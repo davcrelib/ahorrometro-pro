@@ -205,7 +205,7 @@ export default function HomePage() {
           <div className="relative rounded-3xl border border-emerald-300/30 bg-gradient-to-b from-emerald-400/10 to-emerald-400/5 p-6 flex flex-col">
             <div className="absolute -top-3 right-6 text-xs px-2 py-1 rounded-full bg-emerald-400 text-black font-semibold">Recomendado</div>
             <div className="text-sm uppercase tracking-wider text-white/70">Pro</div>
-            <div className="mt-1 text-4xl font-extrabold">4,99 €<span className="text-base font-semibold text-white/70"> / mes</span></div>
+            <div className="mt-1 text-4xl font-extrabold">2,99 €<span className="text-base font-semibold text-white/70"> / mes</span></div>
             <ul className="mt-4 text-sm space-y-2 text-white/85">
               <li>• Sincronización en la nube (móvil y PC)</li>
               <li>• Múltiples objetivos (piso, coche, viaje)</li>
