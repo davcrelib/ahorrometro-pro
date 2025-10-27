@@ -67,7 +67,7 @@ export default function HomePage() {
                 Tu dinero, <span className="text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-emerald-300">en tiempo real</span>
               </h1>
               <p className="mt-4 text-lg text-white/80">
-                Ahorrómetro convierte tus ingresos y gastos en una guía clara: ve cuánto <b>ganas cada hora</b>, cuánto puedes <b>gastar esta semana</b> y cómo avanza tu <b>objetivo del piso</b>.
+                Ahorrómetro convierte tus ingresos y gastos en una guía clara: ve cuánto <b>ganas cada hora</b>, cuánto puedes <b>gastar esta semana</b> y cómo avanzan tus <b>objetivos</b>.
               </p>
               <div className="mt-6 flex flex-wrap gap-3">
                 <button onClick={() => handleCTA("/app")} disabled={signingIn} className="px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Cargando…" : "Probar gratis"}</button>
@@ -291,7 +291,7 @@ const steps = [
   },
   {
     title: "Sigue el progreso",
-    desc: "Revisa tu acumulado y cómo te acercas a tu objetivo del piso.",
+    desc: "Revisa tu acumulado y cómo te acercas a tus objetivos.",
   },
 ];
 
