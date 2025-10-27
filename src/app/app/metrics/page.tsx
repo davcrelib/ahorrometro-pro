@@ -114,7 +114,7 @@ export default function MetricsPage() {
   return (
     <main className="p-4 max-w-6xl mx-auto space-y-4">
       <header className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">📊 Mètriques</h1>
+        <h1 className="text-xl font-bold">📊 Métricas </h1>
         <div className="flex items-center gap-2">
           <input
             type="month"
@@ -129,7 +129,7 @@ export default function MetricsPage() {
       <section className="grid md:grid-cols-2 gap-4">
         {/* Gasto por categoría */}
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
-          <h2 className="font-semibold mb-2">Gasto per categoria</h2>
+          <h2 className="font-semibold mb-2">Gasto por categoria</h2>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -144,7 +144,7 @@ export default function MetricsPage() {
 
         {/* Gasto diario del mes */}
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
-          <h2 className="font-semibold mb-2">Gasto diari (mes)</h2>
+          <h2 className="font-semibold mb-2">Gasto diario (mes)</h2>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={byDay}>
@@ -162,7 +162,7 @@ export default function MetricsPage() {
       <section className="grid md:grid-cols-2 gap-4">
         {/* Presupuesto vs Gastado */}
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
-          <h2 className="font-semibold mb-2">Pressupost vs gastat (mes)</h2>
+          <h2 className="font-semibold mb-2">Presupuesto vs gastado (mes)</h2>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={[{ name: "Mensual", budget: monthlyBudget, spent: totals.spent, remaining: monthlyRemaining }]}>
@@ -176,13 +176,13 @@ export default function MetricsPage() {
             </ResponsiveContainer>
           </div>
           <div className="mt-2 text-sm opacity-90">
-            Pressupost: <b>{fmt(monthlyBudget)}</b> · Gastat: <b>{fmt(totals.spent)}</b> · Resta: <b>{fmt(monthlyRemaining)}</b>
+            Presupuesto: <b>{fmt(monthlyBudget)}</b> · Gastado: <b>{fmt(totals.spent)}</b> · Resta: <b>{fmt(monthlyRemaining)}</b>
           </div>
         </div>
 
         {/* Top conceptos */}
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
-          <h2 className="font-semibold mb-2">Top conceptes (mes)</h2>
+          <h2 className="font-semibold mb-2">Top conceptos (mes)</h2>
           <ul className="space-y-1 text-sm">
             {Object.entries(
               spends.reduce((acc: Record<string, number>, s) => {

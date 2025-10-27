@@ -554,7 +554,7 @@ export default function AppPage() {
             href="/app/metrics"
             className="px-3 py-1 bg-white/10 rounded hover:bg-white/20 transition"
           >
-            📊 Metricas
+            📊 Métricas
           </Link>
 
           <button
