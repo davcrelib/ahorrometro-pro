@@ -1,8 +1,27 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { auth } from "@/lib/firebase";
+import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 
 export default function HomePage() {
+  const router = useRouter();
+  const [signingIn, setSigningIn] = useState(false);
+
+  async function handleSignIn() {
+    try {
+      setSigningIn(true);
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      router.push("/app");
+    } catch (e) {
+      alert("No se pudo iniciar sesión. Revisa Firebase Auth (proveedores habilitados y dominios autorizados).")
+    } finally {
+      setSigningIn(false);
+    }
+  }
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#0b0f14] via-[#0e141b] to-[#0b0f14] text-white">
       {/* NAVBAR */}
@@ -15,7 +34,9 @@ export default function HomePage() {
         </div>
         <div className="flex items-center gap-3 text-sm">
           <Link href="/app" className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition">Ir al panel</Link>
-          <Link href="/app" className="px-4 py-2 rounded-xl bg-white text-black hover:opacity-90 transition">Entrar</Link>
+          <button onClick={handleSignIn} disabled={signingIn} className="px-4 py-2 rounded-xl bg-white text-black hover:opacity-90 transition disabled:opacity-60">
+            {signingIn ? "Entrando…" : "Entrar"}
+          </button>
         </div>
       </nav>
 
