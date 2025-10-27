@@ -550,7 +550,7 @@ export default function AppPage() {
             </div>
             <div className="flex gap-2">
               <button onClick={handleUpgrade} className="rounded-xl px-4 py-2 bg-white text-black">🚀 Upgrade to Pro</button>
-              <Link href="/billing" className="rounded-xl px-4 py-2 bg-white/10 border border-white/15">Ver planes</Link>
+              <Link href="/#precios" className="rounded-xl px-4 py-2 bg-white/10 border border-white/15">Ver planes</Link>
             </div>
           </div>
         </section>
