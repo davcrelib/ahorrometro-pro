@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { signOut } from "firebase/auth";
 
 type Plan = {
   income: number; fixed: number; currentSavings: number; goal: number;
@@ -53,6 +54,18 @@ type ViewMode = "week" | "month" | "all";
 
 export const runtime = "edge"; // UI only
 export default function AppPage() {
+
+  function handleLogout() {
+    signOut(auth)
+      .then(() => {
+        window.location.href = "/"; // redirigeix a la pàgina principal
+      })
+      .catch((err) => {
+        console.error("Error en tancar sessió:", err);
+        alert("No s'ha pogut tancar la sessió");
+      });
+  }
+  
   const [user, loading] = useAuthState(auth);
 
   // Perfil Free/Pro
@@ -534,9 +547,17 @@ export default function AppPage() {
   return (
     <main className="p-4 max-w-6xl mx-auto space-y-4">
       <header className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">🏦 Ahorrómetro</h1>
-        <div className="text-sm opacity-90">Sesión: <b>{user.email}</b></div>
-      </header>
+  <h1 className="text-xl font-bold">🏦 Ahorròmetre</h1>
+  <div className="flex items-center gap-3 text-sm opacity-90">
+    <span><b>{user.email}</b></span>
+      <button
+        onClick={handleLogout}
+        className="px-3 py-1 bg-white/10 rounded hover:bg-white/20 transition"
+      >
+        Tancar sessió
+        </button>
+      </div>
+    </header>
 
       {/* Banner Pro / Free */}
       {planTier === "free" ? (
