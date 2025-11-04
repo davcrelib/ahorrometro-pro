@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { signOut } from "firebase/auth";
 
+// ================== Tipos ==================
 type Plan = {
   income: number; fixed: number; currentSavings: number; goal: number;
   targetDate: string | null; hoursPerMonth: number;
@@ -21,6 +22,11 @@ type Spend = {
   id?: string; note: string; amount: number; date: string; cat: string; createdAt?: any;
 };
 
+type Category = {
+  id?: string; name: string; createdAt?: any;
+};
+
+// ================== Utils ==================
 const fmt = (n?: number) =>
   typeof n === "number" ? n.toLocaleString("es-ES", { style: "currency", currency: "EUR" }) : "—";
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -50,11 +56,12 @@ function monthProgressFraction(now = new Date()) {
   return Math.min(1, Math.max(0, elapsed / total));
 }
 
+// ================== Tipos de vista ==================
 type ViewMode = "week" | "month" | "all";
 
 export const runtime = "edge"; // UI only
 export default function AppPage() {
-
+  // ================== Auth ==================
   function handleLogout() {
     signOut(auth)
       .then(() => {
@@ -65,7 +72,6 @@ export default function AppPage() {
         alert("No s'ha pogut tancar la sessió");
       });
   }
-  
   const [user, loading] = useAuthState(auth);
 
   // Perfil Free/Pro
@@ -81,6 +87,10 @@ export default function AppPage() {
   const [spends, setSpends] = useState<Spend[]>([]);
   const [lastDoc, setLastDoc] = useState<any>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  // ====== Categorías (dinámicas por usuario) ======
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [newCat, setNewCat] = useState("");
 
   // Form gasto
   const [note, setNote] = useState("");
@@ -115,7 +125,43 @@ export default function AppPage() {
     return () => unsubUser();
   }, [user]);
 
-  // Suscripción a gastos con filtro + primera página
+  // === Suscripción a categorías del usuario (y seed si está vacío) ===
+  useEffect(() => {
+    if (!user) return;
+    const catsRef = collection(db, "users", user.uid, "categories");
+    const qCats = query(catsRef, orderBy("name"));
+
+    let seeded = false;
+    const defaultCats = [
+      "Ocio", "Restauración", "Transporte", "Supermercado", "Salud",
+      "Impuestos", "Vehículo", "Seguros", "Ropa", "Viajes", "Regalos", "Otros",
+    ];
+
+    const unsub = onSnapshot(qCats, async (snap) => {
+      if (snap.empty && !seeded) {
+        // Seed inicial solo una vez
+        seeded = true;
+        const batch = writeBatch(db);
+        defaultCats.forEach((c) => {
+          const ref = doc(collection(db, "users", user.uid, "categories"));
+          batch.set(ref, { name: c, createdAt: serverTimestamp() });
+        });
+        await batch.commit();
+        return; // esperar siguiente snapshot con datos
+      }
+      const rows: Category[] = [];
+      snap.forEach((d) => rows.push({ id: d.id, ...(d.data() as Category) }));
+      setCategories(rows);
+      // Si la categoría actual no existe (p.ej. primera carga), selecciona la primera
+      if (rows.length && !rows.some((r) => r.name.toLowerCase() === cat.toLowerCase())) {
+        setCat(rows[0].name);
+      }
+    });
+
+    return () => unsub();
+  }, [user]);
+
+  // === Suscripción a gastos con filtro + primera página ===
   useEffect(() => {
     if (!user) return;
 
@@ -165,11 +211,39 @@ export default function AppPage() {
     alert("Plan guardado ✅");
   }
 
+  // ====== Categorías: crear ======
+  async function createCategory(raw: string) {
+    if (!user) return;
+    const name = (raw || "").trim();
+    if (!name) return alert("Pon un nombre de categoría");
+
+    // Evitar duplicados por nombre (case-insensitive)
+    const exists = categories.some((c) => c.name.toLowerCase() === name.toLowerCase());
+    if (exists) {
+      setCat(name); // seleccionar la existente
+      setNewCat("");
+      return;
+    }
+
+    await addDoc(collection(db, "users", user.uid, "categories"), {
+      name,
+      createdAt: serverTimestamp(),
+    });
+    setNewCat("");
+    setCat(name);
+  }
+
   // Añadir gasto
   async function addSpend() {
     if (!user) return;
     const val = parseFloat(amount || "0");
     if (!(val > 0)) { alert("Importe inválido"); return; }
+
+    // Si el usuario ha escrito una categoría no listada (edge case), créala al vuelo
+    if (cat && !categories.some((c) => c.name.toLowerCase() === cat.toLowerCase())) {
+      await createCategory(cat);
+    }
+
     await addDoc(collection(db, "users", user.uid, "expenses"), {
       note: note.trim() || "Gasto",
       amount: val,
@@ -198,6 +272,12 @@ export default function AppPage() {
   }
   async function saveEdit() {
     if (!user || !editingId || !editRow) return;
+
+    // Si editan y cambian a una categoría nueva, créala al vuelo
+    if (editRow.cat && !categories.some((c) => c.name.toLowerCase() === editRow.cat.toLowerCase())) {
+      await createCategory(editRow.cat);
+    }
+
     await updateDoc(doc(db, "users", user.uid, "expenses", editingId), {
       note: editRow.note,
       amount: editRow.amount,
@@ -327,7 +407,6 @@ export default function AppPage() {
     }
     window.location.href = json.url;
   }
-  
 
   // -------------- BACKUPS: helpers y handlers --------------
   function dl(filename: string, text: string) {
@@ -346,7 +425,7 @@ export default function AppPage() {
 
   // Lee TODOS los gastos del usuario, paginando por createdAt
   async function fetchAllExpensesFull() {
-    if (!user) return [];
+    if (!user) return [] as Spend[];
     const pageSize = 400;
     let last: any = null;
     const out: Spend[] = [];
@@ -614,7 +693,7 @@ export default function AppPage() {
           <div className="text-2xl font-semibold mt-1">{fmt(weeklyBudget)}</div>
           <div className="opacity-70 text-xs mt-1">Libre tras fijos + ahorro</div>
         </div>
-        <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
+        <div className={`rounded-2xl p-4 bg-white/5 border border-white/10`}>
           <div className="opacity-80 text-sm">Semanal (restante)</div>
           <div className={`text-2xl font-semibold mt-1 ${weeklyRemaining <= weeklyBudget * 0.4 ? "text-red-300" : ""}`}>
             {fmt(weeklyRemaining)}
@@ -672,20 +751,24 @@ export default function AppPage() {
             <input placeholder="Importe (€)" type="number" value={amount} onChange={e => setAmount(e.target.value)} className="bg-black/30 p-2 rounded" />
             <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-black/30 p-2 rounded" />
             <select value={cat} onChange={e => setCat(e.target.value)} className="bg-black/30 p-2 rounded">
-              <option value="ocio">Ocio</option>
-              <option value="restauración">Restauración</option>
-              <option value="transporte">Transporte</option>
-              <option value="supermercado">Supermercado</option>
-              <option value="salud">Salud</option>
-              <option value="impuestos">Impuestos</option>
-              <option value="vehículo">Vehículo</option>
-              <option value="seguros">Seguros</option>
-              <option value="ropa">Ropa</option>
-              <option value="viajes">Viajes</option>
-              <option value="regalos">Regalos</option>
-              <option value="otros">Otros</option>
+              {categories.map((c) => (
+                <option key={c.id || c.name} value={c.name}>{c.name}</option>
+              ))}
             </select>
           </div>
+
+          {/* Crear categoría on the fly */}
+          <div className="mt-2 grid grid-cols-3 gap-2 items-center">
+            <input
+              placeholder="Nueva categoría (p.ej. Mascotas)"
+              value={newCat}
+              onChange={(e) => setNewCat(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") createCategory(newCat); }}
+              className="bg-black/30 p-2 rounded col-span-2"
+            />
+            <button onClick={() => createCategory(newCat)} className="rounded px-3 py-2 bg-white text-black">➕ Añadir</button>
+          </div>
+
           <div className="mt-2 text-sm">Semana restante aprox.: <b>{fmt(weeklyRemaining)}</b> (gastado: {fmt(weeklySpent)})</div>
           <button onClick={addSpend} className="mt-3 rounded px-3 py-2 bg-white text-black">Añadir gasto</button>
         </div>
@@ -721,18 +804,9 @@ export default function AppPage() {
                     <td><input value={editRow?.note || ""} onChange={e=>setEditRow(r=>({...r!, note:e.target.value}))} className="bg-black/30 p-1 rounded" /></td>
                     <td>
                       <select value={editRow?.cat || ""} onChange={e=>setEditRow(r=>({...r!, cat:e.target.value}))} className="bg-black/30 p-1 rounded">
-                        <option value="ocio">Ocio</option>
-                        <option value="restauración">Restauración</option>
-                        <option value="transporte">Transporte</option>
-                        <option value="supermercado">Supermercado</option>
-                        <option value="salud">Salud</option>
-                        <option value="impuestos">Impuestos</option>
-                        <option value="vehículo">Vehículo</option>
-                        <option value="seguros">Seguros</option>
-                        <option value="ropa">Ropa</option>
-                        <option value="viajes">Viajes</option>
-                        <option value="regalos">Regalos</option>
-                        <option value="otros">Otros</option>
+                        {categories.map((c) => (
+                          <option key={c.id || c.name} value={c.name}>{c.name}</option>
+                        ))}
                       </select>
                     </td>
                     <td className="text-right">
