@@ -22,7 +22,9 @@ export default function HomePage() {
       await signInIfNeeded();
       router.push("/app");
     } catch (e) {
-      alert("No se pudo iniciar sesión. Revisa Firebase Auth (proveedores habilitados y dominios autorizados).");
+      alert(
+        "No se pudo iniciar sesión. Revisa Firebase Auth (proveedores habilitados y dominios autorizados)."
+      );
     } finally {
       setSigningIn(false);
     }
@@ -34,11 +36,19 @@ export default function HomePage() {
       await signInIfNeeded();
       router.push(target);
     } catch (e) {
-      alert("No se pudo continuar. Comprueba el inicio de sesión de Google y los dominios autorizados en Firebase.");
+      alert(
+        "No se pudo continuar. Comprueba el inicio de sesión de Google y los dominios autorizados en Firebase."
+      );
     } finally {
       setSigningIn(false);
     }
   }
+
+  // Clases base reutilizables para botones con micro-interacciones
+  const btnBase =
+    "inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl font-medium transition active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed";
+  const btnPrimary = `${btnBase} bg-white text-black hover:opacity-90`;
+  const btnGhost = `${btnBase} bg-white/5 border border-white/10 hover:bg-white/10`;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#0b0f14] via-[#0e141b] to-[#0b0f14] text-white">
@@ -51,9 +61,29 @@ export default function HomePage() {
           <span className="font-semibold tracking-tight">Ahorrómetro</span>
         </div>
         <div className="flex items-center gap-3 text-sm">
-          <button onClick={() => handleCTA("/app")} className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition">Ir al panel</button>
-          <Link href="/demo" className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition">Ver demo</Link>
-          <button onClick={handleSignIn} disabled={signingIn} className="px-4 py-2 rounded-xl bg-white text-black hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Entrando…" : "Entrar"}</button>
+          <button
+            onClick={() => handleCTA("/app")}
+            className={btnGhost}
+          >
+            Ir al panel
+          </button>
+          <Link href="/demo" className={btnGhost}>
+            Ver demo
+          </Link>
+          <button
+            onClick={handleSignIn}
+            disabled={signingIn}
+            className={btnPrimary}
+            aria-busy={signingIn}
+          >
+            {signingIn ? (
+              <>
+                <Spinner /> Entrando…
+              </>
+            ) : (
+              "Entrar"
+            )}
+          </button>
         </div>
       </nav>
 
@@ -70,8 +100,23 @@ export default function HomePage() {
                 Ahorrómetro convierte tus ingresos y gastos en una guía clara: ve cuánto <b>ganas cada hora</b>, cuánto puedes <b>gastar esta semana</b> y cómo avanzan tus <b>objetivos</b>.
               </p>
               <div className="mt-6 flex flex-wrap gap-3">
-                <button onClick={() => handleCTA("/app")} disabled={signingIn} className="px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Cargando…" : "Probar gratis"}</button>
-                <a href="#precios" className="px-5 py-3 rounded-2xl bg-white/5 border border-white/10 font-medium hover:bg-white/10 transition">Ver planes</a>
+                <button
+                  onClick={() => handleCTA("/app")}
+                  disabled={signingIn}
+                  className={btnPrimary}
+                  aria-busy={signingIn}
+                >
+                  {signingIn ? (
+                    <>
+                      <Spinner /> Cargando…
+                    </>
+                  ) : (
+                    "Probar gratis"
+                  )}
+                </button>
+                <a href="#precios" className={btnGhost}>
+                  Ver planes
+                </a>
               </div>
               <div className="mt-6 grid grid-cols-3 gap-4 text-sm text-white/80">
                 <div className="rounded-xl bg-white/5 border border-white/10 p-3">
@@ -144,7 +189,10 @@ export default function HomePage() {
         <h2 className="text-2xl md:text-3xl font-bold text-center">Todo lo que necesitas para ahorrar sin Excel</h2>
         <div className="mt-8 grid md:grid-cols-3 gap-4">
           {features.map((f) => (
-            <div key={f.title} className="rounded-2xl bg-white/5 border border-white/10 p-5">
+            <div
+              key={f.title}
+              className="rounded-2xl bg-white/5 border border-white/10 p-5 transition hover:border-white/20 hover:bg-white/10"
+            >
               <div className="text-2xl">{f.emoji}</div>
               <div className="mt-2 font-semibold">{f.title}</div>
               <p className="mt-1 text-sm text-white/80">{f.desc}</p>
@@ -158,15 +206,33 @@ export default function HomePage() {
         <h2 className="text-2xl md:text-3xl font-bold text-center">Cómo funciona</h2>
         <div className="mt-8 grid lg:grid-cols-3 gap-6">
           {steps.map((s, idx) => (
-            <div key={s.title} className="rounded-2xl bg-white/5 border border-white/10 p-5">
-              <div className="h-8 w-8 grid place-items-center rounded-lg bg-white/10 border border-white/10 font-bold text-sm">{idx + 1}</div>
+            <div
+              key={s.title}
+              className="rounded-2xl bg-white/5 border border-white/10 p-5 transition hover:border-white/20 hover:bg-white/10"
+            >
+              <div className="h-8 w-8 grid place-items-center rounded-lg bg-white/10 border border-white/10 font-bold text-sm">
+                {idx + 1}
+              </div>
               <div className="mt-2 font-semibold">{s.title}</div>
               <p className="mt-1 text-sm text-white/80">{s.desc}</p>
             </div>
           ))}
         </div>
         <div className="mt-8 text-center">
-          <button onClick={() => handleCTA("/app")} disabled={signingIn} className="px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Cargando…" : "Empieza ahora"}</button>
+          <button
+            onClick={() => handleCTA("/app")}
+            disabled={signingIn}
+            className={btnPrimary}
+            aria-busy={signingIn}
+          >
+            {signingIn ? (
+              <>
+                <Spinner /> Cargando…
+              </>
+            ) : (
+              "Empieza ahora"
+            )}
+          </button>
         </div>
       </section>
 
@@ -175,7 +241,10 @@ export default function HomePage() {
         <h2 className="text-2xl md:text-3xl font-bold text-center">Historias reales</h2>
         <div className="mt-8 grid md:grid-cols-3 gap-4">
           {testimonials.map((t) => (
-            <div key={t.name} className="rounded-2xl bg-white/5 border border-white/10 p-5">
+            <div
+              key={t.name}
+              className="rounded-2xl bg-white/5 border border-white/10 p-5 transition hover:border-white/20 hover:bg-white/10"
+            >
               <p className="text-sm text-white/90">“{t.quote}”</p>
               <div className="mt-3 text-xs text-white/70">{t.name}</div>
             </div>
@@ -197,14 +266,31 @@ export default function HomePage() {
               <li>• Datos en tu dispositivo local</li>
             </ul>
             <div className="mt-6">
-              <button onClick={() => handleCTA("/app")} disabled={signingIn} className="block w-full text-center px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Cargando…" : "Empieza gratis"}</button>
+              <button
+                onClick={() => handleCTA("/app")}
+                disabled={signingIn}
+                className={btnPrimary + " w-full"}
+                aria-busy={signingIn}
+              >
+                {signingIn ? (
+                  <>
+                    <Spinner /> Cargando…
+                  </>
+                ) : (
+                  "Empieza gratis"
+                )}
+              </button>
             </div>
           </div>
           {/* PRO */}
           <div className="relative rounded-3xl border border-emerald-300/30 bg-gradient-to-b from-emerald-400/10 to-emerald-400/5 p-6 flex flex-col">
-            <div className="absolute -top-3 right-6 text-xs px-2 py-1 rounded-full bg-emerald-400 text-black font-semibold">Recomendado</div>
+            <div className="absolute -top-3 right-6 text-xs px-2 py-1 rounded-full bg-emerald-400 text-black font-semibold">
+              Recomendado
+            </div>
             <div className="text-sm uppercase tracking-wider text-white/70">Pro</div>
-            <div className="mt-1 text-4xl font-extrabold">2,99 €<span className="text-base font-semibold text-white/70"> / mes</span></div>
+            <div className="mt-1 text-4xl font-extrabold">
+              2,99 €<span className="text-base font-semibold text-white/70"> / mes</span>
+            </div>
             <ul className="mt-4 text-sm space-y-2 text-white/85">
               <li>• Sincronización en la nube (móvil y PC)</li>
               <li>• Backups automáticos y exportación 1‑click</li>
@@ -212,7 +298,20 @@ export default function HomePage() {
               <li>• Próximamente notificaciones para recordatorios</li>
             </ul>
             <div className="mt-6">
-              <button onClick={() => handleCTA("/billing")} disabled={signingIn} className="block w-full text-center px-5 py-3 rounded-2xl bg-white text-black font-medium hover:opacity-90 transition disabled:opacity-60">{signingIn ? "Cargando…" : "Actualizar a Pro"}</button>
+              <button
+                onClick={() => handleCTA("/billing")}
+                disabled={signingIn}
+                className={btnPrimary + " w-full"}
+                aria-busy={signingIn}
+              >
+                {signingIn ? (
+                  <>
+                    <Spinner /> Cargando…
+                  </>
+                ) : (
+                  "Actualizar a Pro"
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -223,7 +322,10 @@ export default function HomePage() {
         <h2 className="text-2xl md:text-3xl font-bold text-center">Preguntas frecuentes</h2>
         <div className="mt-6 grid md:grid-cols-2 gap-4">
           {faq.map((q) => (
-            <div key={q.q} className="rounded-2xl bg-white/5 border border-white/10 p-5">
+            <div
+              key={q.q}
+              className="rounded-2xl bg-white/5 border border-white/10 p-5 transition hover:border-white/20 hover:bg-white/10"
+            >
               <div className="font-semibold">{q.q}</div>
               <p className="mt-1 text-sm text-white/80">{q.a}</p>
             </div>
@@ -236,13 +338,44 @@ export default function HomePage() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 flex flex-col md:flex-row items-center justify-between gap-3 text-sm text-white/70">
           <div>© {new Date().getFullYear()} Ahorrómetro. Hecho con ❤️ en España.</div>
           <div className="flex items-center gap-4">
-            <Link href="/terminos" className="hover:text-white">Términos</Link>
-            <Link href="/privacidad" className="hover:text-white">Privacidad</Link>
-            <a href="#precios" className="hover:text-white">Precios</a>
+            <Link href="/terminos" className="hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 rounded-md px-1">
+              Términos
+            </Link>
+            <Link href="/privacidad" className="hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 rounded-md px-1">
+              Privacidad
+            </Link>
+            <a href="#precios" className="hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 rounded-md px-1">
+              Precios
+            </a>
           </div>
         </div>
       </footer>
     </main>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg
+      className="h-4 w-4 animate-spin"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+      />
+    </svg>
   );
 }
 
@@ -295,14 +428,38 @@ const steps = [
 ];
 
 const testimonials = [
-  { name: "María, 27 — Barcelona", quote: "Por fin entiendo cuánto puedo gastar sin sentir culpa. En 2 meses he ahorrado más que en todo el año." },
-  { name: "Javi, 31 — Madrid", quote: "El contador por horas me motiva a no gastar de más. El objetivo del piso ya no parece imposible." },
-  { name: "Laura, 25 — Valencia", quote: "Ligero y claro. Tengo mis gastos controlados sin depender del banco ni hojas de Excel." },
+  {
+    name: "María, 27 — Barcelona",
+    quote:
+      "Por fin entiendo cuánto puedo gastar sin sentir culpa. En 2 meses he ahorrado más que en todo el año.",
+  },
+  {
+    name: "Javi, 31 — Madrid",
+    quote:
+      "El contador por horas me motiva a no gastar de más. El objetivo del piso ya no parece imposible.",
+  },
+  {
+    name: "Laura, 25 — Valencia",
+    quote:
+      "Ligero y claro. Tengo mis gastos controlados sin depender del banco ni hojas de Excel.",
+  },
 ];
 
 const faq = [
-  { q: "¿Necesito conectar mis bancos?", a: "No. Lo apuntas tú en segundos. Tus datos son tuyos y puedes exportarlos cuando quieras." },
-  { q: "¿Funciona sin internet?", a: "No. Tienes que tener una conexión a internet. Para disfrutar sin conexión puedes trabajar en local utilizando el código fuente en github." },
-  { q: "¿Qué incluye el plan Pro?", a: "Sincronización entre dispositivos, múltiples objetivos, backups automáticos y recordatorios." },
-  { q: "¿Puedo cancelar cuando quiera?", a: "Claro. Sin permanencia. Si cancelas, tu información sigue siendo tuya." },
+  {
+    q: "¿Necesito conectar mis bancos?",
+    a: "No. Lo apuntas tú en segundos. Tus datos son tuyos y puedes exportarlos cuando quieras.",
+  },
+  {
+    q: "¿Funciona sin internet?",
+    a: "No. Tienes que tener una conexión a internet. Para disfrutar sin conexión puedes trabajar en local utilizando el código fuente en github.",
+  },
+  {
+    q: "¿Qué incluye el plan Pro?",
+    a: "Sincronización entre dispositivos, múltiples objetivos, backups automáticos y recordatorios.",
+  },
+  {
+    q: "¿Puedo cancelar cuando quiera?",
+    a: "Claro. Sin permanencia. Si cancelas, tu información sigue siendo tuya.",
+  },
 ];
