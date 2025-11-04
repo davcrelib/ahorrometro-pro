@@ -612,7 +612,7 @@ export default function AppPage() {
   if (loading) return <div className="p-6">Cargando…</div>;
   if (!user) {
     return (
-      <main className="p-6 max-w-xl mx-auto">
+      <main className="p-4 sm:p-6 max-w-xl mx-auto">
         <h1 className="text-2xl font-bold mb-2">🏦 Ahorrómetro</h1>
         <p className="opacity-90">Inicia sesión en la página principal para continuar.</p>
         <Link href="/" className="underline">Volver al inicio</Link>
@@ -624,12 +624,12 @@ export default function AppPage() {
   const goalProgress = plan.goal > 0 ? Math.min(100, Math.max(0, (plan.currentSavings / plan.goal) * 100)) : 0;
 
   return (
-    <main className="p-4 max-w-6xl mx-auto space-y-4">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">🏦 Ahorrómetro</h1>
-          <div className="flex items-center gap-3 text-sm opacity-90">
+    <main className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <h1 className="text-xl sm:text-2xl font-bold">🏦 Ahorrómetro</h1>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-sm opacity-90">
           <Link href="/categories" className="underline">Categorías</Link>
-          <span><b>{user.email}</b></span>
+          <span className="truncate max-w-[60vw] sm:max-w-none"><b>{user.email}</b></span>
           <Link
             href="/app/metrics"
             className="px-3 py-1 bg-white/10 rounded hover:bg-white/20 transition"
@@ -645,7 +645,6 @@ export default function AppPage() {
           </button>
         </div>
       </header>
-
 
       {/* Banner Pro / Free */}
       {planTier === "free" ? (
@@ -665,7 +664,7 @@ export default function AppPage() {
         </section>
       ) : (
         <section className="rounded-2xl p-3 border border-emerald-400/30 bg-emerald-400/10">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="text-sm"><b>Pro activo</b> — ¡gracias! 💚</div>
             <div className="flex gap-2">
               <button onClick={handleManageSubscription} className="rounded-xl px-3 py-2 bg-white/10 border border-white/15">
@@ -677,7 +676,7 @@ export default function AppPage() {
       )}
 
       {/* Top stats */}
-      <section className="grid md:grid-cols-4 gap-4">
+      <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
           <div className="opacity-80 text-sm">Acumulado este mes</div>
           <div className="text-2xl font-semibold mt-1">{fmt(earnedThisMonth)}</div>
@@ -693,7 +692,7 @@ export default function AppPage() {
           <div className="text-2xl font-semibold mt-1">{fmt(weeklyBudget)}</div>
           <div className="opacity-70 text-xs mt-1">Libre tras fijos + ahorro</div>
         </div>
-        <div className={`rounded-2xl p-4 bg-white/5 border border-white/10`}>
+        <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
           <div className="opacity-80 text-sm">Semanal (restante)</div>
           <div className={`text-2xl font-semibold mt-1 ${weeklyRemaining <= weeklyBudget * 0.4 ? "text-red-300" : ""}`}>
             {fmt(weeklyRemaining)}
@@ -703,7 +702,7 @@ export default function AppPage() {
       </section>
 
       {/* Progreso objetivo */}
-      <section className="rounded-2xl p-4 bg_WHITE/5 border border-white/10">
+      <section className="rounded-2xl p-4 bg-white/5 border border-white/10">
         <h2 className="font-semibold mb-2">Progreso hacia tu objetivo</h2>
         <div className="text-sm opacity-90 mb-2">
           Ahorros: <b>{fmt(plan.currentSavings)}</b> / Objetivo: <b>{fmt(plan.goal)}</b>{" "}
@@ -712,7 +711,7 @@ export default function AppPage() {
         <div className="w-full h-3 bg-white/10 rounded-xl overflow-hidden">
           <div className="h-3 bg-white/70" style={{ width: `${goalProgress}%` }} />
         </div>
-        <div className="mt-3 text-sm opacity-90 grid md:grid-cols-3 gap-2">
+        <div className="mt-3 text-sm opacity-90 grid grid-cols-1 md:grid-cols-3 gap-2">
           <div>Meses restantes: <b>{monthsLeft ?? "—"}</b></div>
           <div>Ahorro mensual necesario: <b>{fmt(needMonthly)}</b></div>
           <div>Libre mensual: <b>{fmt(leftover)}</b></div>
@@ -720,24 +719,24 @@ export default function AppPage() {
       </section>
 
       {/* Plan + Añadir gasto */}
-      <section className="grid md:grid-cols-2 gap-4">
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
           <h2 className="font-semibold mb-2">Tu plan</h2>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input placeholder="Sueldo neto mensual" type="number" value={plan.income || ""}
-              onChange={e => setPlan(p => ({ ...p, income: +e.target.value }))} className="bg-black/30 p-2 rounded" />
+              onChange={e => setPlan(p => ({ ...p, income: +e.target.value }))} className="bg-black/30 p-2 rounded w-full" />
             <input placeholder="Gastos fijos" type="number" value={plan.fixed || ""}
-              onChange={e => setPlan(p => ({ ...p, fixed: +e.target.value }))} className="bg-black/30 p-2 rounded" />
+              onChange={e => setPlan(p => ({ ...p, fixed: +e.target.value }))} className="bg-black/30 p-2 rounded w-full" />
             <input placeholder="Ahorros actuales" type="number" value={plan.currentSavings || ""}
-              onChange={e => setPlan(p => ({ ...p, currentSavings: +e.target.value }))} className="bg-black/30 p-2 rounded" />
+              onChange={e => setPlan(p => ({ ...p, currentSavings: +e.target.value }))} className="bg-black/30 p-2 rounded w-full" />
             <input placeholder="Objetivo (150000)" type="number" value={plan.goal || ""}
-              onChange={e => setPlan(p => ({ ...p, goal: +e.target.value }))} className="bg-black/30 p-2 rounded" />
+              onChange={e => setPlan(p => ({ ...p, goal: +e.target.value }))} className="bg-black/30 p-2 rounded w-full" />
             <input placeholder="Fecha objetivo" type="date" value={plan.targetDate || ""}
-              onChange={e => setPlan(p => ({ ...p, targetDate: e.target.value || null }))} className="bg-black/30 p-2 rounded" />
+              onChange={e => setPlan(p => ({ ...p, targetDate: e.target.value || null }))} className="bg-black/30 p-2 rounded w-full" />
             <input placeholder="Horas/mes (160)" type="number" value={plan.hoursPerMonth || ""}
-              onChange={e => setPlan(p => ({ ...p, hoursPerMonth: +e.target.value }))} className="bg-black/30 p-2 rounded" />
+              onChange={e => setPlan(p => ({ ...p, hoursPerMonth: +e.target.value }))} className="bg-black/30 p-2 rounded w-full" />
           </div>
-          <button onClick={savePlan} className="mt-3 rounded px-3 py-2 bg-white text-black">Guardar plan</button>
+          <button onClick={savePlan} className="mt-3 rounded px-3 py-2 bg-white text-black w-full sm:w-auto">Guardar plan</button>
           <div className="mt-3 text-sm opacity-90 space-y-1">
             <div>Semanal: <b>{fmt(weeklyBudget)}</b></div>
             <div>Diario (aprox): <b>{fmt(leftover / 30.4)}</b></div>
@@ -746,11 +745,11 @@ export default function AppPage() {
 
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
           <h2 className="font-semibold mb-2">Apuntar un gasto</h2>
-          <div className="grid grid-cols-2 gap-2">
-            <input placeholder="Concepto" value={note} onChange={e => setNote(e.target.value)} className="bg-black/30 p-2 rounded" />
-            <input placeholder="Importe (€)" type="number" value={amount} onChange={e => setAmount(e.target.value)} className="bg-black/30 p-2 rounded" />
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-black/30 p-2 rounded" />
-            <select value={cat} onChange={e => setCat(e.target.value)} className="bg-black/30 p-2 rounded">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <input placeholder="Concepto" value={note} onChange={e => setNote(e.target.value)} className="bg-black/30 p-2 rounded w-full" />
+            <input placeholder="Importe (€)" type="number" value={amount} onChange={e => setAmount(e.target.value)} className="bg-black/30 p-2 rounded w-full" />
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-black/30 p-2 rounded w-full" />
+            <select value={cat} onChange={e => setCat(e.target.value)} className="bg-black/30 p-2 rounded w-full">
               {categories.map((c) => (
                 <option key={c.id || c.name} value={c.name}>{c.name}</option>
               ))}
@@ -758,25 +757,25 @@ export default function AppPage() {
           </div>
 
           {/* Crear categoría on the fly */}
-          <div className="mt-2 grid grid-cols-3 gap-2 items-center">
+          <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 items-center">
             <input
               placeholder="Nueva categoría (p.ej. Mascotas)"
               value={newCat}
               onChange={(e) => setNewCat(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") createCategory(newCat); }}
-              className="bg-black/30 p-2 rounded col-span-2"
+              className="bg-black/30 p-2 rounded sm:col-span-2 w-full"
             />
-            <button onClick={() => createCategory(newCat)} className="rounded px-3 py-2 bg-white text-black">➕ Añadir</button>
+            <button onClick={() => createCategory(newCat)} className="rounded px-3 py-2 bg-white text-black w-full sm:w-auto">➕ Añadir</button>
           </div>
 
           <div className="mt-2 text-sm">Semana restante aprox.: <b>{fmt(weeklyRemaining)}</b> (gastado: {fmt(weeklySpent)})</div>
-          <button onClick={addSpend} className="mt-3 rounded px-3 py-2 bg-white text-black">Añadir gasto</button>
+          <button onClick={addSpend} className="mt-3 rounded px-3 py-2 bg-white text-black w-full sm:w-auto">Añadir gasto</button>
         </div>
       </section>
 
       {/* Historial */}
       <section className="rounded-2xl p-4 bg-white/5 border border-white/10">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
           <h2 className="font-semibold">Historial</h2>
           <div className="flex gap-2 text-sm">
             <button className={`px-3 py-1 rounded ${view==="week"?"bg-white text-black":"bg-white/10"}`} onClick={()=>setView("week")}>Semana</button>
@@ -785,63 +784,69 @@ export default function AppPage() {
           </div>
         </div>
 
-        <table className="w-full text-sm">
-          <thead className="opacity-80">
-            <tr>
-              <th className="text-left">Fecha</th>
-              <th className="text-left">Concepto</th>
-              <th className="text-left">Categoría</th>
-              <th className="text-right">Importe</th>
-              <th className="text-right w-40">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {spends.map((s) => (
-              <tr key={s.id} className="border-t border-white/10">
-                {editingId === s.id ? (
-                  <>
-                    <td><input type="date" value={editRow?.date || ""} onChange={e=>setEditRow(r=>({...r!, date:e.target.value}))} className="bg-black/30 p-1 rounded" /></td>
-                    <td><input value={editRow?.note || ""} onChange={e=>setEditRow(r=>({...r!, note:e.target.value}))} className="bg-black/30 p-1 rounded" /></td>
-                    <td>
-                      <select value={editRow?.cat || ""} onChange={e=>setEditRow(r=>({...r!, cat:e.target.value}))} className="bg-black/30 p-1 rounded">
-                        {categories.map((c) => (
-                          <option key={c.id || c.name} value={c.name}>{c.name}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="text-right">
-                      <input type="number" value={editRow?.amount ?? 0}
-                        onChange={e=>setEditRow(r=>({...r!, amount:+e.target.value}))}
-                        className="bg-black/30 p-1 rounded w-28 text-right" />
-                    </td>
-                    <td className="text-right">
-                      <button onClick={saveEdit} className="px-2 py-1 bg-emerald-500 text-black rounded mr-2">Guardar</button>
-                      <button onClick={cancelEdit} className="px-2 py-1 bg-white/10 rounded">Cancelar</button>
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td>{s.date}</td>
-                    <td>{s.note}</td>
-                    <td>{s.cat}</td>
-                    <td className="text-right">{fmt(s.amount)}</td>
-                    <td className="text-right">
-                      <button onClick={()=>startEdit(s)} className="px-2 py-1 bg-white/10 rounded mr-2">✏️</button>
-                      <button onClick={()=>removeSpend(s.id)} className="px-2 py-1 bg-white/10 rounded">🗑️</button>
-                    </td>
-                  </>
-                )}
+        <div className="overflow-x-auto -mx-2 sm:mx-0">
+          <table className="w-[720px] sm:w-full text-xs sm:text-sm mx-2 sm:mx-0">
+            <thead className="opacity-80">
+              <tr>
+                <th className="text-left py-1 sm:py-2">Fecha</th>
+                <th className="text-left">Concepto</th>
+                <th className="text-left">Categoría</th>
+                <th className="text-right">Importe</th>
+                <th className="text-right w-40">Acciones</th>
               </tr>
-            ))}
-            {spends.length === 0 && (
-              <tr><td colSpan={5} className="py-3 opacity-70">Sin gastos aún.</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {spends.map((s) => (
+                <tr key={s.id} className="border-t border-white/10">
+                  {editingId === s.id ? (
+                    <>
+                      <td className="py-1 sm:py-2"><input type="date" value={editRow?.date || ""} onChange={e=>setEditRow(r=>({...r!, date:e.target.value}))} className="bg-black/30 p-1 rounded w-full" /></td>
+                      <td><input value={editRow?.note || ""} onChange={e=>setEditRow(r=>({...r!, note:e.target.value}))} className="bg-black/30 p-1 rounded w-full" /></td>
+                      <td>
+                        <select value={editRow?.cat || ""} onChange={e=>setEditRow(r=>({...r!, cat:e.target.value}))} className="bg-black/30 p-1 rounded w-full">
+                          {categories.map((c) => (
+                            <option key={c.id || c.name} value={c.name}>{c.name}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="text-right">
+                        <input type="number" value={editRow?.amount ?? 0}
+                          onChange={e=>setEditRow(r=>({...r!, amount:+e.target.value}))}
+                          className="bg-black/30 p-1 rounded w-24 sm:w-28 text-right" />
+                      </td>
+                      <td className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <button onClick={saveEdit} className="px-2 py-1 bg-emerald-500 text-black rounded">Guardar</button>
+                          <button onClick={cancelEdit} className="px-2 py-1 bg-white/10 rounded">Cancelar</button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="py-1 sm:py-2">{s.date}</td>
+                      <td>{s.note}</td>
+                      <td>{s.cat}</td>
+                      <td className="text-right">{fmt(s.amount)}</td>
+                      <td className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <button onClick={()=>startEdit(s)} className="px-2 py-1 bg-white/10 rounded">✏️</button>
+                          <button onClick={()=>removeSpend(s.id)} className="px-2 py-1 bg-white/10 rounded">🗑️</button>
+                        </div>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+              {spends.length === 0 && (
+                <tr><td colSpan={5} className="py-3 opacity-70">Sin gastos aún.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
         {lastDoc && (
           <div className="mt-3 text-right">
-            <button onClick={loadMore} disabled={loadingMore} className="px-3 py-2 bg-white/10 rounded">
+            <button onClick={loadMore} disabled={loadingMore} className="px-3 py-2 bg-white/10 rounded w-full sm:w-auto">
               {loadingMore ? "Cargando…" : "Cargar más"}
             </button>
           </div>
@@ -853,15 +858,15 @@ export default function AppPage() {
         <h2 className="font-semibold mb-2">Backups</h2>
 
         <div className="flex flex-col md:flex-row gap-3 md:items-center">
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <button
               onClick={exportBackupJSON}
-              className="px-3 py-2 bg-white text-black rounded"
+              className="px-3 py-2 bg-white text-black rounded w-full sm:w-auto"
             >
               💾 Exportar JSON
             </button>
 
-            <label className="px-3 py-2 bg-white/10 rounded cursor-pointer">
+            <label className="px-3 py-2 bg-white/10 rounded cursor-pointer text-center w-full sm:w-auto">
               📥 Importar JSON
               <input
                 type="file"
@@ -878,16 +883,16 @@ export default function AppPage() {
           </div>
         </div>
 
-        <div className="mt-3 flex gap-2">
+        <div className="mt-3 flex flex-col sm:flex-row gap-2">
           <button
             onClick={cloudBackupNow}
-            className="px-3 py-2 bg-emerald-400/20 border border-emerald-400/40 rounded"
+            className="px-3 py-2 bg-emerald-400/20 border border-emerald-400/40 rounded w-full sm:w-auto"
           >
             ☁️ Backup en la nube (Pro)
           </button>
           <button
             onClick={restoreFromLatestCloudBackup}
-            className="px-3 py-2 bg-emerald-400/20 border border-emerald-400/40 rounded"
+            className="px-3 py-2 bg-emerald-400/20 border border-emerald-400/40 rounded w-full sm:w-auto"
           >
             ☁️ Restaurar último (Pro)
           </button>
