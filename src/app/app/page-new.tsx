@@ -1,179 +1,331 @@
 "use client";
 
-import { auth, db } from "@/lib/firebase";
-import { useAuthState } from "react-firebase-hooks/auth";
-import {
-  doc, setDoc, getDoc, collection, addDoc,
-  query, orderBy, onSnapshot, serverTimestamp,
-  where, limit, startAfter, getDocs, updateDoc, deleteDoc
-} from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { useAuthState } from "react-firebase-hooks/auth";
+import { auth, db } from "@/lib/firebase";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  startAfter,
+  updateDoc,
+  where,
+  limit as qLimit,
+  writeBatch,
+  DocumentData,
+  QueryDocumentSnapshot,
+} from "firebase/firestore";
 
+// ----------------- Tipos -----------------
 type Plan = {
-  income: number; fixed: number; currentSavings: number; goal: number;
-  targetDate: string | null; hoursPerMonth: number;
+  income: number;
+  fixed: number;
+  currentSavings: number;
+  goal: number;
+  targetDate: string | null; // "YYYY-MM-DD"
+  hoursPerMonth: number;
 };
 
-type Spend = {
-  id?: string; note: string; amount: number; date: string; cat: string; createdAt?: any;
+type SpendDoc = {
+  note: string;
+  amount: number;
+  date: string;     // "YYYY-MM-DD"
+  cat: string;
+  createdAt?: any;
 };
 
-const fmt = (n?: number) =>
-  typeof n === "number" ? n.toLocaleString("es-ES", { style: "currency", currency: "EUR" }) : "—";
-const todayISO = () => new Date().toISOString().slice(0, 10);
+type CategoryDoc = {
+  name: string;
+  emoji?: string;
+  color?: string;
+  order?: number;
+  isDefault?: boolean;
+  createdAt?: any;
+};
 
-// Semana (Lunes–Domingo)
+// Tus tipos “con id” pueden quedar como:
+type Spend = SpendDoc & { id: string };
+type Category = CategoryDoc & { id?: string };
+
+// ----------------- Utilidades -----------------
+function fmt(n: number) {
+  try {
+    return new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(n || 0);
+  } catch {
+    return `${(n || 0).toFixed(2)} €`;
+  }
+}
+function monthProgressFraction(d: Date) {
+  const year = d.getFullYear();
+  const month = d.getMonth();
+  const start = new Date(year, month, 1).getTime();
+  const end = new Date(year, month + 1, 1).getTime();
+  const now = d.getTime();
+  return Math.max(0, Math.min(1, (now - start) / (end - start)));
+}
 function startOfWeek(d = new Date()) {
-  const date = new Date(d);
-  const day = date.getDay(); // 0 dom, 1 lun...
-  const diff = (day === 0 ? -6 : 1 - day);
-  date.setDate(date.getDate() + diff);
-  date.setHours(0, 0, 0, 0);
-  return date;
+  const res = new Date(d);
+  const day = (res.getDay() + 6) % 7; // lunes=0
+  res.setDate(res.getDate() - day);
+  res.setHours(0, 0, 0, 0);
+  return res;
 }
 function endOfWeek(d = new Date()) {
-  const start = startOfWeek(d);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  end.setHours(23, 59, 59, 999);
-  return end;
-}
-function monthProgressFraction(now = new Date()) {
-  const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-  const total = end.getTime() - start.getTime();
-  const elapsed = now.getTime() - start.getTime();
-  if (total <= 0) return 0;
-  return Math.min(1, Math.max(0, elapsed / total));
+  const res = startOfWeek(d);
+  res.setDate(res.getDate() + 6);
+  res.setHours(23, 59, 59, 999);
+  return res;
 }
 
-type ViewMode = "week" | "month" | "all";
-
-export const runtime = "edge"; // UI only
+// ----------------- Componente -----------------
 export default function AppPage() {
   const [user, loading] = useAuthState(auth);
 
-  // Perfil Free/Pro (opcional)
+  // Perfil / plan
+  const [plan, setPlan] = useState<Plan>({
+    income: 0,
+    fixed: 0,
+    currentSavings: 0,
+    goal: 0,
+    targetDate: null,
+    hoursPerMonth: 160,
+  });
   const [planTier, setPlanTier] = useState<"free" | "pro">("free");
 
-  // Plan
-  const [plan, setPlan] = useState<Plan>({
-    income: 0, fixed: 0, currentSavings: 0, goal: 150000, targetDate: null, hoursPerMonth: 160,
-  });
+  // Categorías
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [newCatName, setNewCatName] = useState("");
 
-  // Gastos + paginación
-  const [view, setView] = useState<ViewMode>("week");
-  const [spends, setSpends] = useState<Spend[]>([]);
-  const [lastDoc, setLastDoc] = useState<any>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
-
-  // Form gasto
+  // Gasto actual
   const [note, setNote] = useState("");
   const [amount, setAmount] = useState<string>("");
-  const [date, setDate] = useState(todayISO());
-  const [cat, setCat] = useState("otros");
+  const [date, setDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [cat, setCat] = useState<string>("");
 
-  // Editar gasto
+  // Historial / filtros / paginación
+  const [view, setView] = useState<"week" | "month" | "all">("week");
+  const [spends, setSpends] = useState<Spend[]>([]);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Edición inline
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editRow, setEditRow] = useState<Spend | null>(null);
+  const [editRow, setEditRow] = useState<Partial<Spend> | null>(null);
 
-  // Métricas
-  const [earnedThisMonth, setEarnedThisMonth] = useState<number>(0);
+  // Dinero ganado este mes (contador)
+  const [earnedThisMonth, setEarnedThisMonth] = useState(0);
 
-  // Carga perfil + plan + primera página de gastos
+  // ----------------- Cargar plan + planTier -----------------
   useEffect(() => {
     if (!user) return;
-
-    // Perfil
-    getDoc(doc(db, "users", user.uid)).then(async snap => {
-      if (snap.exists()) setPlanTier((snap.data() as any)?.planTier === "pro" ? "pro" : "free");
-      else {
-        await setDoc(doc(db, "users", user.uid), { planTier: "free", createdAt: serverTimestamp() }, { merge: true });
-        setPlanTier("free");
-      }
+    const userRef = doc(db, "users", user.uid);
+    const unsub = onSnapshot(userRef, (snap) => {
+      const d = snap.data() || {};
+      setPlan({
+        income: d.income ?? 0,
+        fixed: d.fixed ?? 0,
+        currentSavings: d.currentSavings ?? 0,
+        goal: d.goal ?? 0,
+        targetDate: d.targetDate ?? null,
+        hoursPerMonth: d.hoursPerMonth ?? 160,
+      });
+      setPlanTier(d.planTier === "pro" ? "pro" : "free");
     });
-
-    // Plan
-    getDoc(doc(db, "users", user.uid, "plans", "default")).then(s => s.exists() && setPlan(s.data() as Plan));
-
+    return () => unsub();
   }, [user]);
 
-  // Suscripción a gastos con filtro + primera página
+  // ----------------- Cargar/sembrar categorías -----------------
   useEffect(() => {
     if (!user) return;
 
-    // Construye query inicial según vista
-    let qBase;
+    const qCats = query(
+      collection(db, "users", user.uid, "categories"),
+      orderBy("order", "asc")
+    );
+
+    const unsub = onSnapshot(qCats, async (snap) => {
+      if (snap.empty) {
+        // Sembrar por defecto si no hay
+        const seed: Omit<Category, "id">[] = [
+          { name: "Supermercado", emoji: "🛒", order: 10, isDefault: true },
+          { name: "Restauración", emoji: "🍽️", order: 20, isDefault: true },
+          { name: "Transporte", emoji: "🚌", order: 30, isDefault: true },
+          { name: "Ocio", emoji: "🎮", order: 40, isDefault: true },
+          { name: "Otros", emoji: "📦", order: 50, isDefault: true },
+        ];
+        const batch = writeBatch(db);
+        seed.forEach((c) => {
+          const ref = doc(collection(db, "users", user.uid, "categories"));
+          batch.set(ref, { ...c, createdAt: serverTimestamp() });
+        });
+        await batch.commit();
+        return; // la siguiente notificación traerá datos
+      }
+
+      const list: Category[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as CategoryDoc;
+        list.push({ ...data, id: d.id });
+      });
+      setCategories(list);
+
+      // Seleccionar una categoría por defecto si no hay
+      setCat((prev) => prev || list[0]?.name || "");
+    });
+
+    return () => unsub();
+  }, [user]);
+
+  // ----------------- Cargar gastos (suscripción) -----------------
+  useEffect(() => {
+    if (!user) return;
+
+    let q = query(
+      collection(db, "users", user.uid, "expenses"),
+      orderBy("createdAt", "desc"),
+      qLimit(20)
+    );
+
+    const today = new Date();
     if (view === "week") {
-      const sISO = startOfWeek().toISOString().slice(0, 10);
-      const eISO = endOfWeek().toISOString().slice(0, 10);
-      qBase = query(
+      const s = startOfWeek(today).toISOString().slice(0, 10);
+      const e = endOfWeek(today).toISOString().slice(0, 10);
+      q = query(
         collection(db, "users", user.uid, "expenses"),
-        where("date", ">=", sISO), where("date", "<=", eISO),
+        where("date", ">=", s),
+        where("date", "<=", e),
         orderBy("date", "desc"),
-        limit(20)
+        qLimit(20)
       );
     } else if (view === "month") {
-      const now = new Date();
-      const sISO = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-      const eISO = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-      qBase = query(
+      const y = today.getFullYear();
+      const m = (today.getMonth() + 1).toString().padStart(2, "0");
+      const s = `${y}-${m}-01`;
+      const e = new Date(y, today.getMonth() + 1, 0).toISOString().slice(0, 10);
+      q = query(
         collection(db, "users", user.uid, "expenses"),
-        where("date", ">=", sISO), where("date", "<=", eISO),
+        where("date", ">=", s),
+        where("date", "<=", e),
         orderBy("date", "desc"),
-        limit(20)
-      );
-    } else {
-      qBase = query(
-        collection(db, "users", user.uid, "expenses"),
-        orderBy("createdAt", "desc"),
-        limit(20)
+        qLimit(20)
       );
     }
 
-    const unsub = onSnapshot(qBase, (snap) => {
-      const rows: Spend[] = [];
-      snap.forEach(d => rows.push({ id: d.id, ...(d.data() as Spend) }));
-      setSpends(rows);
-      setLastDoc(snap.docs[snap.docs.length - 1] || null);
+    const unsub = onSnapshot(q, (snap) => {
+      const arr: Spend[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as SpendDoc;
+        arr.push({ ...data, id: d.id });
+      });
+      setSpends(arr);
+      setLastDoc(snap.docs.length ? snap.docs[snap.docs.length - 1] : null);
     });
 
     return () => unsub();
   }, [user, view]);
 
-  // Guardar plan
+  // ----------------- Load more -----------------
+  async function loadMore() {
+    if (!user || !lastDoc || loadingMore) return;
+    setLoadingMore(true);
+
+    let q = query(
+      collection(db, "users", user.uid, "expenses"),
+      orderBy("createdAt", "desc"),
+      startAfter(lastDoc),
+      qLimit(20)
+    );
+
+    const today = new Date();
+    if (view === "week") {
+      const s = startOfWeek(today).toISOString().slice(0, 10);
+      const e = endOfWeek(today).toISOString().slice(0, 10);
+      q = query(
+        collection(db, "users", user.uid, "expenses"),
+        where("date", ">=", s),
+        where("date", "<=", e),
+        orderBy("date", "desc"),
+        startAfter(lastDoc),
+        qLimit(20)
+      );
+    } else if (view === "month") {
+      const y = today.getFullYear();
+      const m = (today.getMonth() + 1).toString().padStart(2, "0");
+      const s = `${y}-${m}-01`;
+      const e = new Date(y, today.getMonth() + 1, 0).toISOString().slice(0, 10);
+      q = query(
+        collection(db, "users", user.uid, "expenses"),
+        where("date", ">=", s),
+        where("date", "<=", e),
+        orderBy("date", "desc"),
+        startAfter(lastDoc),
+        qLimit(20)
+      );
+    }
+
+    const snap = await getDocs(q);
+    const more: Spend[] = snap.docs.map((d) => {
+      const data = d.data() as SpendDoc;
+      return { ...data, id: d.id };
+    });
+setSpends((prev) => [...prev, ...more]);
+    setLastDoc(snap.docs.length ? snap.docs[snap.docs.length - 1] : null);
+    setLoadingMore(false);
+  }
+
+  // ----------------- Guardar plan -----------------
   async function savePlan() {
     if (!user) return;
-    await setDoc(doc(db, "users", user.uid, "plans", "default"), plan, { merge: true });
+    const ref = doc(db, "users", user.uid);
+    await setDoc(
+      ref,
+      {
+        ...plan,
+        planTier, // no se toca aquí, solo se conserva
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
     alert("Plan guardado ✅");
   }
 
-  // Añadir gasto
+  // ----------------- Añadir gasto -----------------
   async function addSpend() {
     if (!user) return;
-    const val = parseFloat(amount || "0");
-    if (!(val > 0)) { alert("Importe inválido"); return; }
+    const n = (note || "").trim();
+    const a = +amount;
+    if (!n || !a || !date || !cat) {
+      alert("Rellena concepto, importe, fecha y categoría.");
+      return;
+    }
     await addDoc(collection(db, "users", user.uid, "expenses"), {
-      note: note.trim() || "Gasto",
-      amount: val,
+      note: n,
+      amount: a,
       date,
       cat,
       createdAt: serverTimestamp(),
     });
-    setAmount(""); setNote("");
+    setNote("");
+    setAmount("");
   }
 
-  // Borrar gasto
-  async function removeSpend(id?: string) {
-    if (!user || !id) return;
-    if (!confirm("¿Borrar este gasto?")) return;
+  // ----------------- Borrar / editar -----------------
+  async function removeSpend(id: string) {
+    if (!user) return;
+    if (!confirm("¿Eliminar este gasto?")) return;
     await deleteDoc(doc(db, "users", user.uid, "expenses", id));
   }
-
-  // Editar gasto
   function startEdit(s: Spend) {
-    setEditingId(s.id || null);
+    setEditingId(s.id);
     setEditRow({ ...s });
   }
   function cancelEdit() {
@@ -182,60 +334,48 @@ export default function AppPage() {
   }
   async function saveEdit() {
     if (!user || !editingId || !editRow) return;
-    await updateDoc(doc(db, "users", user.uid, "expenses", editingId), {
-      note: editRow.note,
-      amount: editRow.amount,
-      date: editRow.date,
-      cat: editRow.cat,
+    const ref = doc(db, "users", user.uid, "expenses", editingId);
+    const { note, amount, date, cat } = editRow;
+    await updateDoc(ref, {
+      note: (note || "").trim(),
+      amount: +(+amount! || 0),
+      date: date || new Date().toISOString().slice(0, 10),
+      cat: cat || "Otros",
     });
     setEditingId(null);
     setEditRow(null);
   }
 
-  // Cargar más (paginación)
-  async function loadMore() {
-    if (!user || !lastDoc || loadingMore) return;
-    setLoadingMore(true);
-
-    let qNext;
-    if (view === "all") {
-      qNext = query(
-        collection(db, "users", user.uid, "expenses"),
-        orderBy("createdAt", "desc"),
-        startAfter(lastDoc),
-        limit(20)
-      );
-    } else {
-      const now = new Date();
-      let sISO = "", eISO = "";
-      if (view === "week") {
-        sISO = startOfWeek().toISOString().slice(0, 10);
-        eISO = endOfWeek().toISOString().slice(0, 10);
-      } else {
-        sISO = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-        eISO = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-      }
-      qNext = query(
-        collection(db, "users", user.uid, "expenses"),
-        where("date", ">=", sISO), where("date", "<=", eISO),
-        orderBy("date", "desc"),
-        startAfter(lastDoc),
-        limit(20)
-      );
+  // ----------------- Alta rápida de categoría -----------------
+  async function createCategory() {
+    if (!user) return;
+    const name = (newCatName || "").trim();
+    if (!name) {
+      alert("Pon un nombre para la categoría.");
+      return;
     }
-
-    const snap = await getDocs(qNext);
-    const rows: Spend[] = [];
-    snap.forEach(d => rows.push({ id: d.id, ...(d.data() as Spend) }));
-    setSpends(prev => [...prev, ...rows]);
-    setLastDoc(snap.docs[snap.docs.length - 1] || null);
-    setLoadingMore(false);
+    const exists = categories.some(
+      (c) => c.name.toLowerCase() === name.toLowerCase()
+    );
+    if (exists) {
+      setCat(name);
+      setNewCatName("");
+      return;
+    }
+    await addDoc(collection(db, "users", user.uid, "categories"), {
+      name,
+      emoji: "",
+      order: (categories[categories.length - 1]?.order ?? 0) + 10,
+      createdAt: serverTimestamp(),
+    });
+    setCat(name);
+    setNewCatName("");
   }
 
-  // Cálculos
+  // ----------------- Cálculos -----------------
   const monthsLeft = useMemo(() => {
-    if (!plan.targetDate) return null;
-    const a = new Date(plan.targetDate + "T00:00:00");
+    if (!plan.targetDate) return 0;
+    const a = new Date(plan.targetDate);
     const b = new Date();
     let m = (a.getFullYear() - b.getFullYear()) * 12 + (a.getMonth() - b.getMonth());
     if (a.getDate() - b.getDate() < 0) m -= 1;
@@ -263,7 +403,6 @@ export default function AppPage() {
 
   const weeklyRemaining = Math.max(0, weeklyBudget - weeklySpent);
 
-  // Dinero “acumulado este mes”
   useEffect(() => {
     function refresh() {
       const f = monthProgressFraction(new Date());
@@ -274,15 +413,7 @@ export default function AppPage() {
     return () => clearInterval(t);
   }, [plan.income]);
 
-  // Upgrade (si luego usas /api/checkout, sustituye handler)
-  const checkoutURL = process.env.NEXT_PUBLIC_STRIPE_CHECKOUT_URL || "";
-  function handleUpgrade() {
-    if (!checkoutURL) { alert("Configura NEXT_PUBLIC_STRIPE_CHECKOUT_URL"); return; }
-    const url = new URL(checkoutURL);
-    if (user?.email) url.searchParams.set("prefilled_email", user.email);
-    window.location.href = url.toString();
-  }
-
+  // ----------------- Estado de login -----------------
   if (loading) return <div className="p-6">Cargando…</div>;
   if (!user) {
     return (
@@ -295,8 +426,10 @@ export default function AppPage() {
   }
 
   const euroPerHour = plan.hoursPerMonth > 0 ? plan.income / plan.hoursPerMonth : 0;
-  const goalProgress = plan.goal > 0 ? Math.min(100, Math.max(0, (plan.currentSavings / plan.goal) * 100)) : 0;
+  const goalProgress =
+    plan.goal > 0 ? Math.min(100, Math.max(0, (plan.currentSavings / plan.goal) * 100)) : 0;
 
+  // ----------------- UI -----------------
   return (
     <main className="p-4 max-w-6xl mx-auto space-y-4">
       <header className="flex items-center justify-between">
@@ -304,88 +437,53 @@ export default function AppPage() {
         <div className="text-sm opacity-90">Sesión: <b>{user.email}</b></div>
       </header>
 
-      {/* Banner Pro */}
+      {/* Banner Pro (placeholder) */}
       {planTier === "free" ? (
         <section className="rounded-2xl p-4 border border-yellow-400/30 bg-yellow-400/10">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
               <div className="font-semibold">Plan Free</div>
               <div className="opacity-90 text-sm">
-                Desbloquea <b>múltiples objetivos</b>, <b>recordatorios</b> y <b>backups</b> con <b>Pro</b>.
+                Sincronización en tiempo real incluida. Próximamente podrás activar <b>Pro</b> para desbloquear más funciones.
               </div>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={handleUpgrade} className="rounded-xl px-4 py-2 bg-white text-black">🚀 Upgrade to Pro</button>
-              <Link href="/billing" className="rounded-xl px-4 py-2 bg-white/10 border border-white/15">Ver planes</Link>
             </div>
           </div>
         </section>
       ) : (
-        <section className="rounded-2xl p-3 border border-emerald-400/30 bg-emerald-400/10">
-          <div className="text-sm"><b>Pro activo</b> — ¡gracias! 💚</div>
+        <section className="rounded-2xl p-4 border border-emerald-400/30 bg-emerald-400/10">
+          <div className="font-semibold">✅ Cuenta PRO activa</div>
         </section>
       )}
 
-      {/* Top stats */}
-      <section className="grid md:grid-cols-4 gap-4">
-        <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
-          <div className="opacity-80 text-sm">Acumulado este mes</div>
-          <div className="text-2xl font-semibold mt-1">{fmt(earnedThisMonth)}</div>
-          <div className="opacity-70 text-xs mt-1">Prorrateo de sueldo mensual</div>
-        </div>
-        <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
-          <div className="opacity-80 text-sm">€ / hora</div>
-          <div className="text-2xl font-semibold mt-1">{fmt(euroPerHour)}</div>
-          <div className="opacity-70 text-xs mt-1">{plan.hoursPerMonth || 0} h/mes</div>
-        </div>
-        <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
-          <div className="opacity-80 text-sm">Semanal (presupuesto)</div>
-          <div className="text-2xl font-semibold mt-1">{fmt(weeklyBudget)}</div>
-          <div className="opacity-70 text-xs mt-1">Libre tras fijos + ahorro</div>
-        </div>
-        <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
-          <div className="opacity-80 text-sm">Semanal (restante)</div>
-          <div className={`text-2xl font-semibold mt-1 ${weeklyRemaining <= weeklyBudget * 0.4 ? "text-red-300" : ""}`}>
-            {fmt(weeklyRemaining)}
-          </div>
-          <div className="opacity-70 text-xs mt-1">Gastado esta semana: {fmt(weeklySpent)}</div>
-        </div>
-      </section>
-
-      {/* Progreso objetivo */}
-      <section className="rounded-2xl p-4 bg-white/5 border border-white/10">
-        <h2 className="font-semibold mb-2">Progreso hacia tu objetivo</h2>
-        <div className="text-sm opacity-90 mb-2">
-          Ahorros: <b>{fmt(plan.currentSavings)}</b> / Objetivo: <b>{fmt(plan.goal)}</b>{" "}
-          {plan.targetDate ? <>· Fecha objetivo: <b>{plan.targetDate}</b></> : null}
-        </div>
-        <div className="w-full h-3 bg-white/10 rounded-xl overflow-hidden">
-          <div className="h-3 bg-white/70" style={{ width: `${goalProgress}%` }} />
-        </div>
-        <div className="mt-3 text-sm opacity-90 grid md:grid-cols-3 gap-2">
-          <div>Meses restantes: <b>{monthsLeft ?? "—"}</b></div>
-          <div>Ahorro mensual necesario: <b>{fmt(needMonthly)}</b></div>
-          <div>Libre mensual: <b>{fmt(leftover)}</b></div>
-        </div>
-      </section>
-
-      {/* Plan + Añadir gasto */}
+      {/* Panel superior */}
       <section className="grid md:grid-cols-2 gap-4">
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
           <h2 className="font-semibold mb-2">Tu plan</h2>
           <div className="grid grid-cols-2 gap-2">
-            <input placeholder="Sueldo neto mensual" type="number" value={plan.income || ""}
-              onChange={e => setPlan(p => ({ ...p, income: +e.target.value }))} className="bg-black/30 p-2 rounded" />
-            <input placeholder="Gastos fijos" type="number" value={plan.fixed || ""}
-              onChange={e => setPlan(p => ({ ...p, fixed: +e.target.value }))} className="bg-black/30 p-2 rounded" />
-            <input placeholder="Ahorros actuales" type="number" value={plan.currentSavings || ""}
-              onChange={e => setPlan(p => ({ ...p, currentSavings: +e.target.value }))} className="bg-black/30 p-2 rounded" />
-            <input placeholder="Objetivo (150000)" type="number" value={plan.goal || ""}
-              onChange={e => setPlan(p => ({ ...p, goal: +e.target.value }))} className="bg-black/30 p-2 rounded" />
-            <input placeholder="Fecha objetivo" type="date" value={plan.targetDate || ""}
-              onChange={e => setPlan(p => ({ ...p, targetDate: e.target.value || null }))} className="bg-black/30 p-2 rounded" />
-            <input placeholder="Horas/mes (160)" type="number" value={plan.hoursPerMonth || ""}
-              onChange={e => setPlan(p => ({ ...p, hoursPerMonth: +e.target.value }))} className="bg-black/30 p-2 rounded" />
+            <input placeholder="Ingreso mensual" type="number"
+              value={plan.income || ""}
+              onChange={(e) => setPlan((p) => ({ ...p, income: +e.target.value }))}
+              className="bg-black/30 p-2 rounded" />
+            <input placeholder="Gastos fijos" type="number"
+              value={plan.fixed || ""}
+              onChange={(e) => setPlan((p) => ({ ...p, fixed: +e.target.value }))}
+              className="bg-black/30 p-2 rounded" />
+            <input placeholder="Ahorros actuales" type="number"
+              value={plan.currentSavings || ""}
+              onChange={(e) => setPlan((p) => ({ ...p, currentSavings: +e.target.value }))}
+              className="bg-black/30 p-2 rounded" />
+            <input placeholder="Objetivo (150000)" type="number"
+              value={plan.goal || ""}
+              onChange={(e) => setPlan((p) => ({ ...p, goal: +e.target.value }))}
+              className="bg-black/30 p-2 rounded" />
+            <input placeholder="Fecha objetivo" type="date"
+              value={plan.targetDate || ""}
+              onChange={(e) => setPlan((p) => ({ ...p, targetDate: e.target.value || null }))}
+              className="bg-black/30 p-2 rounded" />
+            <input placeholder="Horas/mes (160)" type="number"
+              value={plan.hoursPerMonth || ""}
+              onChange={(e) => setPlan((p) => ({ ...p, hoursPerMonth: +e.target.value }))}
+              className="bg-black/30 p-2 rounded" />
           </div>
           <button onClick={savePlan} className="mt-3 rounded px-3 py-2 bg-white text-black">Guardar plan</button>
           <div className="mt-3 text-sm opacity-90 space-y-1">
@@ -397,17 +495,41 @@ export default function AppPage() {
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
           <h2 className="font-semibold mb-2">Apuntar un gasto</h2>
           <div className="grid grid-cols-2 gap-2">
-            <input placeholder="Concepto" value={note} onChange={e => setNote(e.target.value)} className="bg-black/30 p-2 rounded" />
-            <input placeholder="Importe (€)" type="number" value={amount} onChange={e => setAmount(e.target.value)} className="bg-black/30 p-2 rounded" />
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-black/30 p-2 rounded" />
-            <select value={cat} onChange={e => setCat(e.target.value)} className="bg-black/30 p-2 rounded">
-              <option value="ocio">Ocio</option>
-              <option value="restauración">Restauración</option>
-              <option value="transporte">Transporte</option>
-              <option value="otros">Otros</option>
-            </select>
+            <input placeholder="Concepto" value={note} onChange={(e) => setNote(e.target.value)} className="bg-black/30 p-2 rounded" />
+            <input placeholder="Importe (€)" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="bg-black/30 p-2 rounded" />
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-black/30 p-2 rounded" />
+
+            {/* Select de categorías + alta rápida */}
+            <div className="col-span-2 flex gap-2">
+              <select
+                value={cat}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v !== "__new__") setCat(v);
+                }}
+                className="bg-black/30 p-2 rounded flex-1"
+              >
+                {categories.map((c) => (
+                  <option key={c.id || c.name} value={c.name}>
+                    {c.emoji ? `${c.emoji} ${c.name}` : c.name}
+                  </option>
+                ))}
+                <option value="__new__">+ Nueva categoría…</option>
+              </select>
+              <input
+                placeholder="Nueva categoría"
+                value={newCatName}
+                onChange={(e) => setNewCatName(e.target.value)}
+                className="bg-black/30 p-2 rounded w-44"
+              />
+              <button type="button" onClick={createCategory} className="px-3 py-2 bg-white text-black rounded">
+                Crear
+              </button>
+            </div>
           </div>
-          <div className="mt-2 text-sm">Semana restante aprox.: <b>{fmt(weeklyRemaining)}</b> (gastado: {fmt(weeklySpent)})</div>
+          <div className="mt-2 text-sm">
+            Semana restante aprox.: <b>{fmt(weeklyRemaining)}</b> (gastado: {fmt(weeklySpent)})
+          </div>
           <button onClick={addSpend} className="mt-3 rounded px-3 py-2 bg-white text-black">Añadir gasto</button>
         </div>
       </section>
@@ -417,9 +539,9 @@ export default function AppPage() {
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-semibold">Historial</h2>
           <div className="flex gap-2 text-sm">
-            <button className={`px-3 py-1 rounded ${view==="week"?"bg-white text-black":"bg-white/10"}`} onClick={()=>setView("week")}>Semana</button>
-            <button className={`px-3 py-1 rounded ${view==="month"?"bg-white text-black":"bg-white/10"}`} onClick={()=>setView("month")}>Mes</button>
-            <button className={`px-3 py-1 rounded ${view==="all"?"bg-white text-black":"bg-white/10"}`} onClick={()=>setView("all")}>Todo</button>
+            <button className={`px-3 py-1 rounded ${view === "week" ? "bg-white text-black" : "bg-white/10"}`} onClick={() => setView("week")}>Semana</button>
+            <button className={`px-3 py-1 rounded ${view === "month" ? "bg-white text-black" : "bg-white/10"}`} onClick={() => setView("month")}>Mes</button>
+            <button className={`px-3 py-1 rounded ${view === "all" ? "bg-white text-black" : "bg-white/10"}`} onClick={() => setView("all")}>Todo</button>
           </div>
         </div>
 
@@ -438,20 +560,41 @@ export default function AppPage() {
               <tr key={s.id} className="border-t border-white/10">
                 {editingId === s.id ? (
                   <>
-                    <td><input type="date" value={editRow?.date || ""} onChange={e=>setEditRow(r=>({...r!, date:e.target.value}))} className="bg-black/30 p-1 rounded" /></td>
-                    <td><input value={editRow?.note || ""} onChange={e=>setEditRow(r=>({...r!, note:e.target.value}))} className="bg-black/30 p-1 rounded" /></td>
                     <td>
-                      <select value={editRow?.cat || ""} onChange={e=>setEditRow(r=>({...r!, cat:e.target.value}))} className="bg-black/30 p-1 rounded">
-                        <option value="ocio">Ocio</option>
-                        <option value="restauración">Restauración</option>
-                        <option value="transporte">Transporte</option>
-                        <option value="otros">Otros</option>
+                      <input
+                        type="date"
+                        value={editRow?.date || ""}
+                        onChange={(e) => setEditRow((r) => ({ ...(r as Spend), date: e.target.value }))}
+                        className="bg-black/30 p-1 rounded"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={editRow?.note || ""}
+                        onChange={(e) => setEditRow((r) => ({ ...(r as Spend), note: e.target.value }))}
+                        className="bg-black/30 p-1 rounded"
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={editRow?.cat || ""}
+                        onChange={(e) => setEditRow((r) => ({ ...(r as Spend), cat: e.target.value }))}
+                        className="bg-black/30 p-1 rounded"
+                      >
+                        {categories.map((c) => (
+                          <option key={c.id || c.name} value={c.name}>
+                            {c.emoji ? `${c.emoji} ${c.name}` : c.name}
+                          </option>
+                        ))}
                       </select>
                     </td>
                     <td className="text-right">
-                      <input type="number" value={editRow?.amount ?? 0}
-                        onChange={e=>setEditRow(r=>({...r!, amount:+e.target.value}))}
-                        className="bg-black/30 p-1 rounded w-28 text-right" />
+                      <input
+                        type="number"
+                        value={editRow?.amount ?? 0}
+                        onChange={(e) => setEditRow((r) => ({ ...(r as Spend), amount: +e.target.value }))}
+                        className="bg-black/30 p-1 rounded w-28 text-right"
+                      />
                     </td>
                     <td className="text-right">
                       <button onClick={saveEdit} className="px-2 py-1 bg-emerald-500 text-black rounded mr-2">Guardar</button>
@@ -465,15 +608,17 @@ export default function AppPage() {
                     <td>{s.cat}</td>
                     <td className="text-right">{fmt(s.amount)}</td>
                     <td className="text-right">
-                      <button onClick={()=>startEdit(s)} className="px-2 py-1 bg-white/10 rounded mr-2">✏️</button>
-                      <button onClick={()=>removeSpend(s.id)} className="px-2 py-1 bg-white/10 rounded">🗑️</button>
+                      <button onClick={() => startEdit(s)} className="px-2 py-1 bg-white/10 rounded mr-2">✏️</button>
+                      <button onClick={() => removeSpend(s.id)} className="px-2 py-1 bg-white/10 rounded">🗑️</button>
                     </td>
                   </>
                 )}
               </tr>
             ))}
             {spends.length === 0 && (
-              <tr><td colSpan={5} className="py-3 opacity-70">Sin gastos aún.</td></tr>
+              <tr>
+                <td colSpan={5} className="py-3 opacity-70">Sin gastos aún.</td>
+              </tr>
             )}
           </tbody>
         </table>
@@ -485,6 +630,28 @@ export default function AppPage() {
             </button>
           </div>
         )}
+      </section>
+
+      {/* Indicadores */}
+      <section className="rounded-2xl p-4 bg-white/5 border border-white/10">
+        <h2 className="font-semibold mb-2">Indicadores rápidos</h2>
+        <div className="grid sm:grid-cols-3 gap-3 text-sm">
+          <div className="rounded-xl p-3 bg-black/30">
+            <div className="opacity-80">Has “ganado” este mes</div>
+            <div className="text-lg font-semibold">{fmt(earnedThisMonth)}</div>
+            <div className="opacity-70">~ {fmt(euroPerHour)}/hora</div>
+          </div>
+          <div className="rounded-xl p-3 bg-black/30">
+            <div className="opacity-80">Restante semanal</div>
+            <div className="text-lg font-semibold">{fmt(weeklyRemaining)}</div>
+            <div className="opacity-70">Gastado esta semana: {fmt(weeklySpent)}</div>
+          </div>
+          <div className="rounded-xl p-3 bg-black/30">
+            <div className="opacity-80">Progreso objetivo</div>
+            <div className="text-lg font-semibold">{goalProgress.toFixed(0)}%</div>
+            <div className="opacity-70">Objetivo: {fmt(plan.goal)}</div>
+          </div>
+        </div>
       </section>
     </main>
   );
