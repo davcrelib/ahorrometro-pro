@@ -16,7 +16,6 @@ import { signOut } from "firebase/auth";
 type Plan = {
   income: number; fixed: number; currentSavings: number; goal: number;
   targetDate: string | null; hoursPerMonth: number;
-  trackingStart?: string | null; // ⬅️ opcional: fecha de inicio del acumulado (YYYY-MM-DD)
 };
 
 type Spend = {
@@ -55,21 +54,6 @@ function monthProgressFraction(now = new Date()) {
   const elapsed = now.getTime() - start.getTime();
   if (total <= 0) return 0;
   return Math.min(1, Math.max(0, elapsed / total));
-}
-
-// ===== Helpers para el acumulado continuo =====
-function fullMonthsBetween(start: Date, now: Date) {
-  const a = new Date(start.getFullYear(), start.getMonth(), 1);
-  const b = new Date(now.getFullYear(), now.getMonth(), 1);
-  const m = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
-  return Math.max(0, m);
-}
-function currentMonthFraction(from: Date, now: Date) {
-  const sameMonth = from.getFullYear() === now.getFullYear() && from.getMonth() === now.getMonth();
-  const totalDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const startDay = sameMonth ? from.getDate() : 1;
-  const elapsedDays = Math.min(totalDays, Math.max(0, now.getDate() - startDay + 1));
-  return Math.min(1, Math.max(0, elapsedDays / totalDays));
 }
 
 // ================== Tipos de vista ==================
@@ -121,10 +105,6 @@ export default function AppPage() {
   // Métricas
   const [earnedThisMonth, setEarnedThisMonth] = useState<number>(0);
 
-  // ====== NUEVO: fecha de inicio y gastos acumulados desde inicio ======
-  const [trackingStart, setTrackingStart] = useState<string | null>(null);
-  const [expensesSinceStart, setExpensesSinceStart] = useState<number>(0);
-
   // === Carga perfil + plan (en tiempo real) ===
   useEffect(() => {
     if (!user) return;
@@ -140,13 +120,7 @@ export default function AppPage() {
     });
 
     // Plan (carga inicial)
-    getDoc(doc(db, "users", user.uid, "plans", "default")).then(s => {
-      if (s.exists()) {
-        const p = s.data() as Plan;
-        setPlan(p);
-        setTrackingStart(p.trackingStart ?? null); // lee fecha inicio si existe
-      }
-    });
+    getDoc(doc(db, "users", user.uid, "plans", "default")).then(s => s.exists() && setPlan(s.data() as Plan));
 
     return () => unsubUser();
   }, [user]);
@@ -187,7 +161,7 @@ export default function AppPage() {
     return () => unsub();
   }, [user]);
 
-  // === Suscripción a gastos con filtro + primera página (para listado) ===
+  // === Suscripción a gastos con filtro + primera página ===
   useEffect(() => {
     if (!user) return;
 
@@ -230,45 +204,10 @@ export default function AppPage() {
     return () => unsub();
   }, [user, view]);
 
-  // ===== NUEVO: suscripción a gastos desde trackingStart para el acumulado continuo =====
-  useEffect(() => {
-    if (!user) return;
-    if (!trackingStart) { // sin fecha de inicio: no restamos nada
-      setExpensesSinceStart(0);
-      return;
-    }
-
-    const startISO = (trackingStart + "T00:00:00").slice(0, 10);
-    const qExp = query(
-      collection(db, "users", user.uid, "expenses"),
-      where("date", ">=", startISO),
-      orderBy("date", "asc")
-    );
-
-    const unsub = onSnapshot(qExp, (snap) => {
-      let total = 0;
-      snap.forEach(d => { const s = d.data() as Spend; total += s.amount || 0; });
-      setExpensesSinceStart(total);
-    });
-
-    return () => unsub();
-  }, [user, trackingStart]);
-
-  // Guardar plan (si no hay trackingStart y hay datos, lo fija a HOY)
+  // Guardar plan
   async function savePlan() {
     if (!user) return;
-
-    const hasData = (plan.income || 0) > 0 || (plan.fixed || 0) > 0;
-    const needsStart = !plan.trackingStart && hasData;
-
-    const newPlan: Plan = needsStart
-      ? { ...plan, trackingStart: todayISO() }
-      : plan;
-
-    await setDoc(doc(db, "users", user.uid, "plans", "default"), newPlan, { merge: true });
-    setPlan(newPlan);
-    if (needsStart) setTrackingStart(newPlan.trackingStart!);
-
+    await setDoc(doc(db, "users", user.uid, "plans", "default"), plan, { merge: true });
     alert("Plan guardado ✅");
   }
 
@@ -420,35 +359,16 @@ export default function AppPage() {
 
   const weeklyRemaining = Math.max(0, weeklyBudget - weeklySpent);
 
-  // ===== Acumulado continuo: Ahorros actuales + (income - fixed) prorrateado − gastos desde trackingStart =====
+  // Dinero “acumulado este mes”
   useEffect(() => {
-    // Si no hay trackingStart o no hay datos, mostramos 0
-    if (!trackingStart || ((plan.income || 0) <= 0 && (plan.fixed || 0) <= 0)) {
-      setEarnedThisMonth(0);
-      return;
-    }
-
-    const start = new Date(trackingStart + "T00:00:00");
-
     function refresh() {
-      const now = new Date();
-      const monthlyNet = Math.max(0, (plan.income || 0) - (plan.fixed || 0));
-      const fullM = fullMonthsBetween(start, now);
-      const frac = currentMonthFraction(start, now);
-      const netEarned = monthlyNet * fullM + monthlyNet * frac;
-
-      const total =
-        (plan.currentSavings || 0) // incluye ahorro inicial
-        + netEarned
-        - (expensesSinceStart || 0);
-
-      setEarnedThisMonth(total);
+      const f = monthProgressFraction(new Date());
+      setEarnedThisMonth(plan.income * f);
     }
-
     refresh();
-    const t = setInterval(refresh, 60 * 1000);
+    const t = setInterval(refresh, 1000);
     return () => clearInterval(t);
-  }, [plan.income, plan.fixed, plan.currentSavings, trackingStart, expensesSinceStart]);
+  }, [plan.income]);
 
   // === Upgrade / Portal (Stripe) ===
   async function handleUpgrade() {
