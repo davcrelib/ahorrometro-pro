@@ -16,6 +16,8 @@ import {
   getDocs,
   writeBatch,
   getCountFromServer,
+  limit,
+  startAfter,
 } from "firebase/firestore";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -156,20 +158,23 @@ export default function CategoriesPage() {
         targetId = added.id;
       }
 
-      // migrar gastos por lotes
+      // migrar gastos por lotes paginados para evitar repetir siempre la primera página
       const ref = collection(db, "users", user.uid, "expenses");
       const pageSize = 400;
       let moved = 0;
+      let last: any = null;
       while (true) {
-        const snap = await getDocs(query(ref, where("cat", "==", catToDelete.name), orderBy("createdAt", "desc"), limitFor(pageSize)));
+        const q = last
+          ? query(ref, where("cat", "==", catToDelete.name), orderBy("createdAt", "desc"), startAfter(last), limit(pageSize))
+          : query(ref, where("cat", "==", catToDelete.name), orderBy("createdAt", "desc"), limit(pageSize));
+        const snap = await getDocs(q);
         if (snap.empty) break;
         const batch = writeBatch(db);
-        snap.docs.forEach((d) => {
-          batch.update(d.ref, { cat: target });
-        });
+        snap.docs.forEach((d) => batch.update(d.ref, { cat: target }));
         await batch.commit();
         moved += snap.size;
         setProgress(`Migrados ${moved} gastos…`);
+        last = snap.docs[snap.docs.length - 1];
         if (snap.size < pageSize) break;
       }
 
@@ -179,19 +184,13 @@ export default function CategoriesPage() {
       closeDelete();
     } catch (e: any) {
       console.error(e);
-      alert("No se pudo completar la operación: " + e?.message);
+      alert("No se pudo completar la operación: " + (e?.message || e));
     } finally {
       setBusy(false);
       setProgress("");
     }
   }
 
-  // helper para evitar dependencia directa de limit() en import principal
-  function limitFor(n: number) {
-    // Importación tardía de limit() para no romper el tree-shaking si cambia la API
-    // @ts-ignore
-    return (window as any).firebaseLimit ? (window as any).firebaseLimit(n) : (require("firebase/firestore").limit(n));
-  }
 
   if (!user) {
     return (
