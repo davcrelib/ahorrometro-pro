@@ -16,8 +16,7 @@ import { signOut } from "firebase/auth";
 type Plan = {
   income: number; fixed: number; currentSavings: number; goal: number;
   targetDate: string | null; hoursPerMonth: number;
-  // opcional: fecha de inicio para el acumulado continuo (YYYY-MM-DD)
-  trackingStart?: string | null;
+  trackingStart?: string | null; // ⬅️ opcional: fecha de inicio del acumulado (YYYY-MM-DD)
 };
 
 type Spend = {
@@ -59,9 +58,6 @@ function monthProgressFraction(now = new Date()) {
 }
 
 // ===== Helpers para el acumulado continuo =====
-function firstDayOfMonth(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
-}
 function fullMonthsBetween(start: Date, now: Date) {
   const a = new Date(start.getFullYear(), start.getMonth(), 1);
   const b = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -148,7 +144,7 @@ export default function AppPage() {
       if (s.exists()) {
         const p = s.data() as Plan;
         setPlan(p);
-        setTrackingStart(p.trackingStart ?? null); // <-- lee fecha inicio si existe
+        setTrackingStart(p.trackingStart ?? null); // lee fecha inicio si existe
       }
     });
 
@@ -191,7 +187,7 @@ export default function AppPage() {
     return () => unsub();
   }, [user]);
 
-  // === Suscripción a gastos con filtro + primera página ===
+  // === Suscripción a gastos con filtro + primera página (para listado) ===
   useEffect(() => {
     if (!user) return;
 
@@ -237,14 +233,12 @@ export default function AppPage() {
   // ===== NUEVO: suscripción a gastos desde trackingStart para el acumulado continuo =====
   useEffect(() => {
     if (!user) return;
+    if (!trackingStart) { // sin fecha de inicio: no restamos nada
+      setExpensesSinceStart(0);
+      return;
+    }
 
-    const now = new Date();
-    const start = trackingStart
-      ? new Date(trackingStart + "T00:00:00")
-      : new Date(now.getFullYear(), 0, 1); // 1 de enero por defecto
-
-    const startISO = start.toISOString().slice(0, 10);
-
+    const startISO = (trackingStart + "T00:00:00").slice(0, 10);
     const qExp = query(
       collection(db, "users", user.uid, "expenses"),
       where("date", ">=", startISO),
@@ -260,11 +254,21 @@ export default function AppPage() {
     return () => unsub();
   }, [user, trackingStart]);
 
-  // Guardar plan
+  // Guardar plan (si no hay trackingStart y hay datos, lo fija a HOY)
   async function savePlan() {
     if (!user) return;
-    await setDoc(doc(db, "users", user.uid, "plans", "default"), plan, { merge: true });
-    // si el plan incluye trackingStart, el efecto anterior lo recogerá al recargar/editar
+
+    const hasData = (plan.income || 0) > 0 || (plan.fixed || 0) > 0;
+    const needsStart = !plan.trackingStart && hasData;
+
+    const newPlan: Plan = needsStart
+      ? { ...plan, trackingStart: todayISO() }
+      : plan;
+
+    await setDoc(doc(db, "users", user.uid, "plans", "default"), newPlan, { merge: true });
+    setPlan(newPlan);
+    if (needsStart) setTrackingStart(newPlan.trackingStart!);
+
     alert("Plan guardado ✅");
   }
 
@@ -416,25 +420,35 @@ export default function AppPage() {
 
   const weeklyRemaining = Math.max(0, weeklyBudget - weeklySpent);
 
-  // ===== CAMBIO CLAVE: Acumulado continuo (ingreso - fijos) prorrateado − gastos desde trackingStart =====
+  // ===== Acumulado continuo: Ahorros actuales + (income - fixed) prorrateado − gastos desde trackingStart =====
   useEffect(() => {
-    const now = new Date();
-    const start = trackingStart
-      ? new Date(trackingStart + "T00:00:00")
-      : new Date(now.getFullYear(), 0, 1); // 1 de enero si no hay trackingStart
+    // Si no hay trackingStart o no hay datos, mostramos 0
+    if (!trackingStart || ((plan.income || 0) <= 0 && (plan.fixed || 0) <= 0)) {
+      setEarnedThisMonth(0);
+      return;
+    }
+
+    const start = new Date(trackingStart + "T00:00:00");
 
     function refresh() {
+      const now = new Date();
       const monthlyNet = Math.max(0, (plan.income || 0) - (plan.fixed || 0));
-      const fullMonths = fullMonthsBetween(start, now);
+      const fullM = fullMonthsBetween(start, now);
       const frac = currentMonthFraction(start, now);
-      const netEarned = monthlyNet * fullMonths + monthlyNet * frac;
-      const continuousBalance = netEarned - (expensesSinceStart || 0);
-      setEarnedThisMonth(continuousBalance);
+      const netEarned = monthlyNet * fullM + monthlyNet * frac;
+
+      const total =
+        (plan.currentSavings || 0) // incluye ahorro inicial
+        + netEarned
+        - (expensesSinceStart || 0);
+
+      setEarnedThisMonth(total);
     }
+
     refresh();
-    const t = setInterval(refresh, 60 * 1000); // refresco cada minuto
+    const t = setInterval(refresh, 60 * 1000);
     return () => clearInterval(t);
-  }, [plan.income, plan.fixed, trackingStart, expensesSinceStart]);
+  }, [plan.income, plan.fixed, plan.currentSavings, trackingStart, expensesSinceStart]);
 
   // === Upgrade / Portal (Stripe) ===
   async function handleUpgrade() {
@@ -744,7 +758,7 @@ export default function AppPage() {
       {/* Top stats */}
       <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
-          <div className="opacity-80 text-sm">Ahorro neto actual</div>
+          <div className="opacity-80 text-sm">Acumulado este mes</div>
           <div className="text-2xl font-semibold mt-1">{fmt(earnedThisMonth)}</div>
           <div className="opacity-70 text-xs mt-1">Prorrateo de sueldo mensual</div>
         </div>
@@ -960,7 +974,7 @@ export default function AppPage() {
             onClick={restoreFromLatestCloudBackup}
             className="px-3 py-2 bg-emerald-400/20 border border-emerald-400/40 rounded w-full sm:w-auto"
           >
-            ☁️ Restaurar último backup (Pro)
+            ☁️ Restaurar último (Pro)
           </button>
         </div>
       </section>

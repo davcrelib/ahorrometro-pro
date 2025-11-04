@@ -12,15 +12,22 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { signOut } from "firebase/auth";
 
+// ================== Tipos ==================
 type Plan = {
   income: number; fixed: number; currentSavings: number; goal: number;
   targetDate: string | null; hoursPerMonth: number;
+  trackingStart?: string | null; // ⬅️ opcional: fecha de inicio del acumulado (YYYY-MM-DD)
 };
 
 type Spend = {
   id?: string; note: string; amount: number; date: string; cat: string; createdAt?: any;
 };
 
+type Category = {
+  id?: string; name: string; createdAt?: any;
+};
+
+// ================== Utils ==================
 const fmt = (n?: number) =>
   typeof n === "number" ? n.toLocaleString("es-ES", { style: "currency", currency: "EUR" }) : "—";
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -50,11 +57,27 @@ function monthProgressFraction(now = new Date()) {
   return Math.min(1, Math.max(0, elapsed / total));
 }
 
+// ===== Helpers para el acumulado continuo =====
+function fullMonthsBetween(start: Date, now: Date) {
+  const a = new Date(start.getFullYear(), start.getMonth(), 1);
+  const b = new Date(now.getFullYear(), now.getMonth(), 1);
+  const m = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+  return Math.max(0, m);
+}
+function currentMonthFraction(from: Date, now: Date) {
+  const sameMonth = from.getFullYear() === now.getFullYear() && from.getMonth() === now.getMonth();
+  const totalDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const startDay = sameMonth ? from.getDate() : 1;
+  const elapsedDays = Math.min(totalDays, Math.max(0, now.getDate() - startDay + 1));
+  return Math.min(1, Math.max(0, elapsedDays / totalDays));
+}
+
+// ================== Tipos de vista ==================
 type ViewMode = "week" | "month" | "all";
 
 export const runtime = "edge"; // UI only
 export default function AppPage() {
-
+  // ================== Auth ==================
   function handleLogout() {
     signOut(auth)
       .then(() => {
@@ -65,7 +88,6 @@ export default function AppPage() {
         alert("No s'ha pogut tancar la sessió");
       });
   }
-  
   const [user, loading] = useAuthState(auth);
 
   // Perfil Free/Pro
@@ -82,6 +104,10 @@ export default function AppPage() {
   const [lastDoc, setLastDoc] = useState<any>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
+  // ====== Categorías (dinámicas por usuario) ======
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [newCat, setNewCat] = useState("");
+
   // Form gasto
   const [note, setNote] = useState("");
   const [amount, setAmount] = useState<string>("");
@@ -94,6 +120,10 @@ export default function AppPage() {
 
   // Métricas
   const [earnedThisMonth, setEarnedThisMonth] = useState<number>(0);
+
+  // ====== NUEVO: fecha de inicio y gastos acumulados desde inicio ======
+  const [trackingStart, setTrackingStart] = useState<string | null>(null);
+  const [expensesSinceStart, setExpensesSinceStart] = useState<number>(0);
 
   // === Carga perfil + plan (en tiempo real) ===
   useEffect(() => {
@@ -110,12 +140,54 @@ export default function AppPage() {
     });
 
     // Plan (carga inicial)
-    getDoc(doc(db, "users", user.uid, "plans", "default")).then(s => s.exists() && setPlan(s.data() as Plan));
+    getDoc(doc(db, "users", user.uid, "plans", "default")).then(s => {
+      if (s.exists()) {
+        const p = s.data() as Plan;
+        setPlan(p);
+        setTrackingStart(p.trackingStart ?? null); // lee fecha inicio si existe
+      }
+    });
 
     return () => unsubUser();
   }, [user]);
 
-  // Suscripción a gastos con filtro + primera página
+  // === Suscripción a categorías del usuario (y seed si está vacío) ===
+  useEffect(() => {
+    if (!user) return;
+    const catsRef = collection(db, "users", user.uid, "categories");
+    const qCats = query(catsRef, orderBy("name"));
+
+    let seeded = false;
+    const defaultCats = [
+      "Ocio", "Restauración", "Transporte", "Supermercado", "Salud",
+      "Impuestos", "Vehículo", "Seguros", "Ropa", "Viajes", "Regalos", "Otros",
+    ];
+
+    const unsub = onSnapshot(qCats, async (snap) => {
+      if (snap.empty && !seeded) {
+        // Seed inicial solo una vez
+        seeded = true;
+        const batch = writeBatch(db);
+        defaultCats.forEach((c) => {
+          const ref = doc(collection(db, "users", user.uid, "categories"));
+          batch.set(ref, { name: c, createdAt: serverTimestamp() });
+        });
+        await batch.commit();
+        return; // esperar siguiente snapshot con datos
+      }
+      const rows: Category[] = [];
+      snap.forEach((d) => rows.push({ id: d.id, ...(d.data() as Category) }));
+      setCategories(rows);
+      // Si la categoría actual no existe (p.ej. primera carga), selecciona la primera
+      if (rows.length && !rows.some((r) => r.name.toLowerCase() === cat.toLowerCase())) {
+        setCat(rows[0].name);
+      }
+    });
+
+    return () => unsub();
+  }, [user]);
+
+  // === Suscripción a gastos con filtro + primera página (para listado) ===
   useEffect(() => {
     if (!user) return;
 
@@ -158,11 +230,68 @@ export default function AppPage() {
     return () => unsub();
   }, [user, view]);
 
-  // Guardar plan
+  // ===== NUEVO: suscripción a gastos desde trackingStart para el acumulado continuo =====
+  useEffect(() => {
+    if (!user) return;
+    if (!trackingStart) { // sin fecha de inicio: no restamos nada
+      setExpensesSinceStart(0);
+      return;
+    }
+
+    const startISO = (trackingStart + "T00:00:00").slice(0, 10);
+    const qExp = query(
+      collection(db, "users", user.uid, "expenses"),
+      where("date", ">=", startISO),
+      orderBy("date", "asc")
+    );
+
+    const unsub = onSnapshot(qExp, (snap) => {
+      let total = 0;
+      snap.forEach(d => { const s = d.data() as Spend; total += s.amount || 0; });
+      setExpensesSinceStart(total);
+    });
+
+    return () => unsub();
+  }, [user, trackingStart]);
+
+  // Guardar plan (si no hay trackingStart y hay datos, lo fija a HOY)
   async function savePlan() {
     if (!user) return;
-    await setDoc(doc(db, "users", user.uid, "plans", "default"), plan, { merge: true });
+
+    const hasData = (plan.income || 0) > 0 || (plan.fixed || 0) > 0;
+    const needsStart = !plan.trackingStart && hasData;
+
+    const newPlan: Plan = needsStart
+      ? { ...plan, trackingStart: todayISO() }
+      : plan;
+
+    await setDoc(doc(db, "users", user.uid, "plans", "default"), newPlan, { merge: true });
+    setPlan(newPlan);
+    if (needsStart) setTrackingStart(newPlan.trackingStart!);
+
     alert("Plan guardado ✅");
+  }
+
+  // ====== Categorías: crear ======
+  async function createCategory(raw: string) {
+    if (!user) return;
+    const name = (raw || "").trim();
+    if (!name) return alert("Pon un nombre de categoría");
+
+    // Evitar duplicados por nombre (case-insensitive)
+    const exists = categories.some((c) => c.name.toLowerCase() === name.toLowerCase());
+    if (exists) {
+      setCat(name); // seleccionar la existente
+      setNewCat("");
+      return;
+    }
+
+    await addDoc(collection(db, "users", user.uid, "categories"), {
+      name,
+      createdAt: serverTimestamp(),
+    });
+    setNewCat("");
+    setCat(name);
   }
 
   // Añadir gasto
@@ -170,6 +299,12 @@ export default function AppPage() {
     if (!user) return;
     const val = parseFloat(amount || "0");
     if (!(val > 0)) { alert("Importe inválido"); return; }
+
+    // Si el usuario ha escrito una categoría no listada (edge case), créala al vuelo
+    if (cat && !categories.some((c) => c.name.toLowerCase() === cat.toLowerCase())) {
+      await createCategory(cat);
+    }
+
     await addDoc(collection(db, "users", user.uid, "expenses"), {
       note: note.trim() || "Gasto",
       amount: val,
@@ -198,6 +333,12 @@ export default function AppPage() {
   }
   async function saveEdit() {
     if (!user || !editingId || !editRow) return;
+
+    // Si editan y cambian a una categoría nueva, créala al vuelo
+    if (editRow.cat && !categories.some((c) => c.name.toLowerCase() === editRow.cat.toLowerCase())) {
+      await createCategory(editRow.cat);
+    }
+
     await updateDoc(doc(db, "users", user.uid, "expenses", editingId), {
       note: editRow.note,
       amount: editRow.amount,
@@ -279,16 +420,35 @@ export default function AppPage() {
 
   const weeklyRemaining = Math.max(0, weeklyBudget - weeklySpent);
 
-  // Dinero “acumulado este mes”
+  // ===== Acumulado continuo: Ahorros actuales + (income - fixed) prorrateado − gastos desde trackingStart =====
   useEffect(() => {
-    function refresh() {
-      const f = monthProgressFraction(new Date());
-      setEarnedThisMonth(plan.income * f);
+    // Si no hay trackingStart o no hay datos, mostramos 0
+    if (!trackingStart || ((plan.income || 0) <= 0 && (plan.fixed || 0) <= 0)) {
+      setEarnedThisMonth(0);
+      return;
     }
+
+    const start = new Date(trackingStart + "T00:00:00");
+
+    function refresh() {
+      const now = new Date();
+      const monthlyNet = Math.max(0, (plan.income || 0) - (plan.fixed || 0));
+      const fullM = fullMonthsBetween(start, now);
+      const frac = currentMonthFraction(start, now);
+      const netEarned = monthlyNet * fullM + monthlyNet * frac;
+
+      const total =
+        (plan.currentSavings || 0) // incluye ahorro inicial
+        + netEarned
+        - (expensesSinceStart || 0);
+
+      setEarnedThisMonth(total);
+    }
+
     refresh();
-    const t = setInterval(refresh, 1000);
+    const t = setInterval(refresh, 60 * 1000);
     return () => clearInterval(t);
-  }, [plan.income]);
+  }, [plan.income, plan.fixed, plan.currentSavings, trackingStart, expensesSinceStart]);
 
   // === Upgrade / Portal (Stripe) ===
   async function handleUpgrade() {
@@ -327,7 +487,6 @@ export default function AppPage() {
     }
     window.location.href = json.url;
   }
-  
 
   // -------------- BACKUPS: helpers y handlers --------------
   function dl(filename: string, text: string) {
@@ -346,7 +505,7 @@ export default function AppPage() {
 
   // Lee TODOS los gastos del usuario, paginando por createdAt
   async function fetchAllExpensesFull() {
-    if (!user) return [];
+    if (!user) return [] as Spend[];
     const pageSize = 400;
     let last: any = null;
     const out: Spend[] = [];
@@ -533,7 +692,7 @@ export default function AppPage() {
   if (loading) return <div className="p-6">Cargando…</div>;
   if (!user) {
     return (
-      <main className="p-6 max-w-xl mx-auto">
+      <main className="p-4 sm:p-6 max-w-xl mx-auto">
         <h1 className="text-2xl font-bold mb-2">🏦 Ahorrómetro</h1>
         <p className="opacity-90">Inicia sesión en la página principal para continuar.</p>
         <Link href="/" className="underline">Volver al inicio</Link>
@@ -545,12 +704,12 @@ export default function AppPage() {
   const goalProgress = plan.goal > 0 ? Math.min(100, Math.max(0, (plan.currentSavings / plan.goal) * 100)) : 0;
 
   return (
-    <main className="p-4 max-w-6xl mx-auto space-y-4">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">🏦 Ahorrómetro</h1>
-          <div className="flex items-center gap-3 text-sm opacity-90">
+    <main className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <h1 className="text-xl sm:text-2xl font-bold">🏦 Ahorrómetro</h1>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-sm opacity-90">
           <Link href="/categories" className="underline">Categorías</Link>
-          <span><b>{user.email}</b></span>
+          <span className="truncate max-w-[60vw] sm:max-w-none"><b>{user.email}</b></span>
           <Link
             href="/app/metrics"
             className="px-3 py-1 bg-white/10 rounded hover:bg-white/20 transition"
@@ -566,7 +725,6 @@ export default function AppPage() {
           </button>
         </div>
       </header>
-
 
       {/* Banner Pro / Free */}
       {planTier === "free" ? (
@@ -586,7 +744,7 @@ export default function AppPage() {
         </section>
       ) : (
         <section className="rounded-2xl p-3 border border-emerald-400/30 bg-emerald-400/10">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="text-sm"><b>Pro activo</b> — ¡gracias! 💚</div>
             <div className="flex gap-2">
               <button onClick={handleManageSubscription} className="rounded-xl px-3 py-2 bg-white/10 border border-white/15">
@@ -598,7 +756,7 @@ export default function AppPage() {
       )}
 
       {/* Top stats */}
-      <section className="grid md:grid-cols-4 gap-4">
+      <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
           <div className="opacity-80 text-sm">Acumulado este mes</div>
           <div className="text-2xl font-semibold mt-1">{fmt(earnedThisMonth)}</div>
@@ -624,7 +782,7 @@ export default function AppPage() {
       </section>
 
       {/* Progreso objetivo */}
-      <section className="rounded-2xl p-4 bg_WHITE/5 border border-white/10">
+      <section className="rounded-2xl p-4 bg-white/5 border border-white/10">
         <h2 className="font-semibold mb-2">Progreso hacia tu objetivo</h2>
         <div className="text-sm opacity-90 mb-2">
           Ahorros: <b>{fmt(plan.currentSavings)}</b> / Objetivo: <b>{fmt(plan.goal)}</b>{" "}
@@ -633,7 +791,7 @@ export default function AppPage() {
         <div className="w-full h-3 bg-white/10 rounded-xl overflow-hidden">
           <div className="h-3 bg-white/70" style={{ width: `${goalProgress}%` }} />
         </div>
-        <div className="mt-3 text-sm opacity-90 grid md:grid-cols-3 gap-2">
+        <div className="mt-3 text-sm opacity-90 grid grid-cols-1 md:grid-cols-3 gap-2">
           <div>Meses restantes: <b>{monthsLeft ?? "—"}</b></div>
           <div>Ahorro mensual necesario: <b>{fmt(needMonthly)}</b></div>
           <div>Libre mensual: <b>{fmt(leftover)}</b></div>
@@ -641,24 +799,24 @@ export default function AppPage() {
       </section>
 
       {/* Plan + Añadir gasto */}
-      <section className="grid md:grid-cols-2 gap-4">
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
           <h2 className="font-semibold mb-2">Tu plan</h2>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input placeholder="Sueldo neto mensual" type="number" value={plan.income || ""}
-              onChange={e => setPlan(p => ({ ...p, income: +e.target.value }))} className="bg-black/30 p-2 rounded" />
+              onChange={e => setPlan(p => ({ ...p, income: +e.target.value }))} className="bg-black/30 p-2 rounded w-full" />
             <input placeholder="Gastos fijos" type="number" value={plan.fixed || ""}
-              onChange={e => setPlan(p => ({ ...p, fixed: +e.target.value }))} className="bg-black/30 p-2 rounded" />
+              onChange={e => setPlan(p => ({ ...p, fixed: +e.target.value }))} className="bg-black/30 p-2 rounded w-full" />
             <input placeholder="Ahorros actuales" type="number" value={plan.currentSavings || ""}
-              onChange={e => setPlan(p => ({ ...p, currentSavings: +e.target.value }))} className="bg-black/30 p-2 rounded" />
+              onChange={e => setPlan(p => ({ ...p, currentSavings: +e.target.value }))} className="bg-black/30 p-2 rounded w-full" />
             <input placeholder="Objetivo (150000)" type="number" value={plan.goal || ""}
-              onChange={e => setPlan(p => ({ ...p, goal: +e.target.value }))} className="bg-black/30 p-2 rounded" />
+              onChange={e => setPlan(p => ({ ...p, goal: +e.target.value }))} className="bg-black/30 p-2 rounded w-full" />
             <input placeholder="Fecha objetivo" type="date" value={plan.targetDate || ""}
-              onChange={e => setPlan(p => ({ ...p, targetDate: e.target.value || null }))} className="bg-black/30 p-2 rounded" />
+              onChange={e => setPlan(p => ({ ...p, targetDate: e.target.value || null }))} className="bg-black/30 p-2 rounded w-full" />
             <input placeholder="Horas/mes (160)" type="number" value={plan.hoursPerMonth || ""}
-              onChange={e => setPlan(p => ({ ...p, hoursPerMonth: +e.target.value }))} className="bg-black/30 p-2 rounded" />
+              onChange={e => setPlan(p => ({ ...p, hoursPerMonth: +e.target.value }))} className="bg-black/30 p-2 rounded w-full" />
           </div>
-          <button onClick={savePlan} className="mt-3 rounded px-3 py-2 bg-white text-black">Guardar plan</button>
+          <button onClick={savePlan} className="mt-3 rounded px-3 py-2 bg-white text-black w-full sm:w-auto">Guardar plan</button>
           <div className="mt-3 text-sm opacity-90 space-y-1">
             <div>Semanal: <b>{fmt(weeklyBudget)}</b></div>
             <div>Diario (aprox): <b>{fmt(leftover / 30.4)}</b></div>
@@ -667,33 +825,37 @@ export default function AppPage() {
 
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
           <h2 className="font-semibold mb-2">Apuntar un gasto</h2>
-          <div className="grid grid-cols-2 gap-2">
-            <input placeholder="Concepto" value={note} onChange={e => setNote(e.target.value)} className="bg-black/30 p-2 rounded" />
-            <input placeholder="Importe (€)" type="number" value={amount} onChange={e => setAmount(e.target.value)} className="bg-black/30 p-2 rounded" />
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-black/30 p-2 rounded" />
-            <select value={cat} onChange={e => setCat(e.target.value)} className="bg-black/30 p-2 rounded">
-              <option value="ocio">Ocio</option>
-              <option value="restauración">Restauración</option>
-              <option value="transporte">Transporte</option>
-              <option value="supermercado">Supermercado</option>
-              <option value="salud">Salud</option>
-              <option value="impuestos">Impuestos</option>
-              <option value="vehículo">Vehículo</option>
-              <option value="seguros">Seguros</option>
-              <option value="ropa">Ropa</option>
-              <option value="viajes">Viajes</option>
-              <option value="regalos">Regalos</option>
-              <option value="otros">Otros</option>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <input placeholder="Concepto" value={note} onChange={e => setNote(e.target.value)} className="bg-black/30 p-2 rounded w-full" />
+            <input placeholder="Importe (€)" type="number" value={amount} onChange={e => setAmount(e.target.value)} className="bg-black/30 p-2 rounded w-full" />
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-black/30 p-2 rounded w-full" />
+            <select value={cat} onChange={e => setCat(e.target.value)} className="bg-black/30 p-2 rounded w-full">
+              {categories.map((c) => (
+                <option key={c.id || c.name} value={c.name}>{c.name}</option>
+              ))}
             </select>
           </div>
+
+          {/* Crear categoría on the fly */}
+          <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 items-center">
+            <input
+              placeholder="Nueva categoría (p.ej. Mascotas)"
+              value={newCat}
+              onChange={(e) => setNewCat(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") createCategory(newCat); }}
+              className="bg-black/30 p-2 rounded sm:col-span-2 w-full"
+            />
+            <button onClick={() => createCategory(newCat)} className="rounded px-3 py-2 bg-white text-black w-full sm:w-auto">➕ Añadir</button>
+          </div>
+
           <div className="mt-2 text-sm">Semana restante aprox.: <b>{fmt(weeklyRemaining)}</b> (gastado: {fmt(weeklySpent)})</div>
-          <button onClick={addSpend} className="mt-3 rounded px-3 py-2 bg-white text-black">Añadir gasto</button>
+          <button onClick={addSpend} className="mt-3 rounded px-3 py-2 bg-white text-black w-full sm:w-auto">Añadir gasto</button>
         </div>
       </section>
 
       {/* Historial */}
       <section className="rounded-2xl p-4 bg-white/5 border border-white/10">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
           <h2 className="font-semibold">Historial</h2>
           <div className="flex gap-2 text-sm">
             <button className={`px-3 py-1 rounded ${view==="week"?"bg-white text-black":"bg-white/10"}`} onClick={()=>setView("week")}>Semana</button>
@@ -702,72 +864,69 @@ export default function AppPage() {
           </div>
         </div>
 
-        <table className="w-full text-sm">
-          <thead className="opacity-80">
-            <tr>
-              <th className="text-left">Fecha</th>
-              <th className="text-left">Concepto</th>
-              <th className="text-left">Categoría</th>
-              <th className="text-right">Importe</th>
-              <th className="text-right w-40">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {spends.map((s) => (
-              <tr key={s.id} className="border-t border-white/10">
-                {editingId === s.id ? (
-                  <>
-                    <td><input type="date" value={editRow?.date || ""} onChange={e=>setEditRow(r=>({...r!, date:e.target.value}))} className="bg-black/30 p-1 rounded" /></td>
-                    <td><input value={editRow?.note || ""} onChange={e=>setEditRow(r=>({...r!, note:e.target.value}))} className="bg-black/30 p-1 rounded" /></td>
-                    <td>
-                      <select value={editRow?.cat || ""} onChange={e=>setEditRow(r=>({...r!, cat:e.target.value}))} className="bg-black/30 p-1 rounded">
-                        <option value="ocio">Ocio</option>
-                        <option value="restauración">Restauración</option>
-                        <option value="transporte">Transporte</option>
-                        <option value="supermercado">Supermercado</option>
-                        <option value="salud">Salud</option>
-                        <option value="impuestos">Impuestos</option>
-                        <option value="vehículo">Vehículo</option>
-                        <option value="seguros">Seguros</option>
-                        <option value="ropa">Ropa</option>
-                        <option value="viajes">Viajes</option>
-                        <option value="regalos">Regalos</option>
-                        <option value="otros">Otros</option>
-                      </select>
-                    </td>
-                    <td className="text-right">
-                      <input type="number" value={editRow?.amount ?? 0}
-                        onChange={e=>setEditRow(r=>({...r!, amount:+e.target.value}))}
-                        className="bg-black/30 p-1 rounded w-28 text-right" />
-                    </td>
-                    <td className="text-right">
-                      <button onClick={saveEdit} className="px-2 py-1 bg-emerald-500 text-black rounded mr-2">Guardar</button>
-                      <button onClick={cancelEdit} className="px-2 py-1 bg-white/10 rounded">Cancelar</button>
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td>{s.date}</td>
-                    <td>{s.note}</td>
-                    <td>{s.cat}</td>
-                    <td className="text-right">{fmt(s.amount)}</td>
-                    <td className="text-right">
-                      <button onClick={()=>startEdit(s)} className="px-2 py-1 bg-white/10 rounded mr-2">✏️</button>
-                      <button onClick={()=>removeSpend(s.id)} className="px-2 py-1 bg-white/10 rounded">🗑️</button>
-                    </td>
-                  </>
-                )}
+        <div className="overflow-x-auto -mx-2 sm:mx-0">
+          <table className="w-[720px] sm:w-full text-xs sm:text-sm mx-2 sm:mx-0">
+            <thead className="opacity-80">
+              <tr>
+                <th className="text-left py-1 sm:py-2">Fecha</th>
+                <th className="text-left">Concepto</th>
+                <th className="text-left">Categoría</th>
+                <th className="text-right">Importe</th>
+                <th className="text-right w-40">Acciones</th>
               </tr>
-            ))}
-            {spends.length === 0 && (
-              <tr><td colSpan={5} className="py-3 opacity-70">Sin gastos aún.</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {spends.map((s) => (
+                <tr key={s.id} className="border-t border-white/10">
+                  {editingId === s.id ? (
+                    <>
+                      <td className="py-1 sm:py-2"><input type="date" value={editRow?.date || ""} onChange={e=>setEditRow(r=>({...r!, date:e.target.value}))} className="bg-black/30 p-1 rounded w-full" /></td>
+                      <td><input value={editRow?.note || ""} onChange={e=>setEditRow(r=>({...r!, note:e.target.value}))} className="bg-black/30 p-1 rounded w-full" /></td>
+                      <td>
+                        <select value={editRow?.cat || ""} onChange={e=>setEditRow(r=>({...r!, cat:e.target.value}))} className="bg-black/30 p-1 rounded w-full">
+                          {categories.map((c) => (
+                            <option key={c.id || c.name} value={c.name}>{c.name}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="text-right">
+                        <input type="number" value={editRow?.amount ?? 0}
+                          onChange={e=>setEditRow(r=>({...r!, amount:+e.target.value}))}
+                          className="bg-black/30 p-1 rounded w-24 sm:w-28 text-right" />
+                      </td>
+                      <td className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <button onClick={saveEdit} className="px-2 py-1 bg-emerald-500 text-black rounded">Guardar</button>
+                          <button onClick={cancelEdit} className="px-2 py-1 bg-white/10 rounded">Cancelar</button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="py-1 sm:py-2">{s.date}</td>
+                      <td>{s.note}</td>
+                      <td>{s.cat}</td>
+                      <td className="text-right">{fmt(s.amount)}</td>
+                      <td className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <button onClick={()=>startEdit(s)} className="px-2 py-1 bg-white/10 rounded">✏️</button>
+                          <button onClick={()=>removeSpend(s.id)} className="px-2 py-1 bg-white/10 rounded">🗑️</button>
+                        </div>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+              {spends.length === 0 && (
+                <tr><td colSpan={5} className="py-3 opacity-70">Sin gastos aún.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
         {lastDoc && (
           <div className="mt-3 text-right">
-            <button onClick={loadMore} disabled={loadingMore} className="px-3 py-2 bg-white/10 rounded">
+            <button onClick={loadMore} disabled={loadingMore} className="px-3 py-2 bg-white/10 rounded w-full sm:w-auto">
               {loadingMore ? "Cargando…" : "Cargar más"}
             </button>
           </div>
@@ -779,15 +938,15 @@ export default function AppPage() {
         <h2 className="font-semibold mb-2">Backups</h2>
 
         <div className="flex flex-col md:flex-row gap-3 md:items-center">
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <button
               onClick={exportBackupJSON}
-              className="px-3 py-2 bg-white text-black rounded"
+              className="px-3 py-2 bg-white text-black rounded w-full sm:w-auto"
             >
               💾 Exportar JSON
             </button>
 
-            <label className="px-3 py-2 bg-white/10 rounded cursor-pointer">
+            <label className="px-3 py-2 bg-white/10 rounded cursor-pointer text-center w-full sm:w-auto">
               📥 Importar JSON
               <input
                 type="file"
@@ -804,16 +963,16 @@ export default function AppPage() {
           </div>
         </div>
 
-        <div className="mt-3 flex gap-2">
+        <div className="mt-3 flex flex-col sm:flex-row gap-2">
           <button
             onClick={cloudBackupNow}
-            className="px-3 py-2 bg-emerald-400/20 border border-emerald-400/40 rounded"
+            className="px-3 py-2 bg-emerald-400/20 border border-emerald-400/40 rounded w-full sm:w-auto"
           >
             ☁️ Backup en la nube (Pro)
           </button>
           <button
             onClick={restoreFromLatestCloudBackup}
-            className="px-3 py-2 bg-emerald-400/20 border border-emerald-400/40 rounded"
+            className="px-3 py-2 bg-emerald-400/20 border border-emerald-400/40 rounded w-full sm:w-auto"
           >
             ☁️ Restaurar último (Pro)
           </button>
