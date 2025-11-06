@@ -105,6 +105,33 @@ export default function AppPage() {
   // Métricas
   const [earnedThisMonth, setEarnedThisMonth] = useState<number>(0);
 
+  // Gasto total del mes (se actualiza en tiempo real)
+  const [monthSpent, setMonthSpent] = useState<number>(0);
+
+  // Suscripción al gasto del mes (suma de importes)
+  useEffect(() => {
+    if (!user) return;
+
+    const now = new Date();
+    const startISO = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+    const endISO = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+
+    const qMonth = query(
+      collection(db, "users", user.uid, "expenses"),
+      where("date", ">=", startISO),
+      where("date", "<=", endISO),
+      orderBy("date", "desc")
+    );
+
+    const unsub = onSnapshot(qMonth, (snap) => {
+      let total = 0;
+      snap.forEach(d => { total += (d.data() as any).amount || 0; });
+      setMonthSpent(total);
+    });
+
+    return () => unsub();
+  }, [user]);
+
   // === Carga perfil + plan (en tiempo real) ===
   useEffect(() => {
     if (!user) return;
@@ -369,6 +396,10 @@ export default function AppPage() {
     const t = setInterval(refresh, 1000);
     return () => clearInterval(t);
   }, [plan.income]);
+
+  const totalBalance = useMemo(() => {
+    return (plan.currentSavings || 0) + earnedThisMonth - monthSpent;
+}, [plan.currentSavings, earnedThisMonth, monthSpent]);
 
   // === Upgrade / Portal (Stripe) ===
   async function handleUpgrade() {
@@ -676,11 +707,20 @@ export default function AppPage() {
       )}
 
       {/* Top stats */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+      <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
           <div className="opacity-80 text-sm">Acumulado este mes</div>
           <div className="text-2xl font-semibold mt-1">{fmt(earnedThisMonth)}</div>
           <div className="opacity-70 text-xs mt-1">Prorrateo de sueldo mensual</div>
+        </div>
+        <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
+          <div className="opacity-80 text-sm">Saldo total</div>
+          <div className={`text-2xl font-semibold mt-1 ${totalBalance < 0 ? "text-red-300" : "text-emerald-200"}`}>
+            {fmt(totalBalance)}
+          </div>
+          <div className="opacity-70 text-xs mt-1">
+              Ahorros + acumulado mes − gastos mes
+          </div>
         </div>
         <div className="rounded-2xl p-4 bg-white/5 border border-white/10">
           <div className="opacity-80 text-sm">€ / hora</div>
